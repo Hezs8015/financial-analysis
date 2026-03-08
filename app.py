@@ -383,7 +383,7 @@ if st.button("🚀 开始训练模型", type="primary"):
                 y=df['Close'].iloc[-60:],
                 mode='lines',
                 name='历史数据',
-                line=dict(color='black', width=2)
+                line=dict(color='white', width=2)
             ))
             
             fig_future.add_trace(go.Scatter(
@@ -427,6 +427,76 @@ if st.button("🚀 开始训练模型", type="primary"):
                 file_name='stock_prediction_results.csv',
                 mime='text/csv'
             )
+            
+            # 模型推荐
+            st.header("🏆 模型推荐")
+            
+            # 计算综合得分（越低越好）
+            bilstm_score = (bilstm_metrics['RMSE'] + bilstm_metrics['MAE']) / 2 + (1 - bilstm_metrics['R²']) + (1 - bilstm_metrics['Direction_Accuracy'])
+            trans_score = (trans_metrics['RMSE'] + trans_metrics['MAE']) / 2 + (1 - trans_metrics['R²']) + (1 - trans_metrics['Direction_Accuracy'])
+            
+            if trans_score < bilstm_score:
+                winner = "Transformer"
+                winner_metrics = trans_metrics
+                loser_metrics = bilstm_metrics
+                reason = "Transformer模型在捕捉长期依赖关系方面表现更优"
+                color = "#ff6b6b"
+            else:
+                winner = "BiLSTM"
+                winner_metrics = bilstm_metrics
+                loser_metrics = trans_metrics
+                reason = "BiLSTM模型在捕捉时序特征方面表现更优"
+                color = "#4ecdc4"
+            
+            # 计算优势百分比
+            rmse_improvement = ((loser_metrics['RMSE'] - winner_metrics['RMSE']) / loser_metrics['RMSE']) * 100
+            mae_improvement = ((loser_metrics['MAE'] - winner_metrics['MAE']) / loser_metrics['MAE']) * 100
+            r2_improvement = ((winner_metrics['R²'] - loser_metrics['R²']) / abs(loser_metrics['R²'])) * 100 if loser_metrics['R²'] != 0 else 0
+            dir_improvement = ((winner_metrics['Direction_Accuracy'] - loser_metrics['Direction_Accuracy']) / loser_metrics['Direction_Accuracy']) * 100
+            
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, {color}22, {color}11); 
+                        border-left: 5px solid {color}; 
+                        padding: 20px; 
+                        border-radius: 10px; 
+                        margin: 20px 0;">
+                <h3 style="color: {color}; margin-top: 0;">🎯 推荐模型: {winner}</h3>
+                <p style="font-size: 16px; margin: 10px 0;"><strong>{reason}</strong></p>
+                
+                <h4 style="margin-top: 20px;">📊 性能优势对比:</h4>
+                <ul style="font-size: 14px; line-height: 1.8;">
+                    <li>RMSE 降低: <strong>{rmse_improvement:.2f}%</strong> ({loser_metrics['RMSE']:.4f} → {winner_metrics['RMSE']:.4f})</li>
+                    <li>MAE 降低: <strong>{mae_improvement:.2f}%</strong> ({loser_metrics['MAE']:.4f} → {winner_metrics['MAE']:.4f})</li>
+                    <li>R² 提升: <strong>{r2_improvement:.2f}%</strong> ({loser_metrics['R²']:.4f} → {winner_metrics['R²']:.4f})</li>
+                    <li>方向准确率提升: <strong>{dir_improvement:.2f}%</strong> ({loser_metrics['Direction_Accuracy']:.2%} → {winner_metrics['Direction_Accuracy']:.2%})</li>
+                </ul>
+                
+                <div style="background-color: rgba(255,255,255,0.5); padding: 15px; border-radius: 8px; margin-top: 15px;">
+                    <h4 style="margin-top: 0;">💡 使用建议:</h4>
+                    <p style="margin: 5px 0;">基于当前数据集，建议使用 <strong>{winner}</strong> 模型进行股价预测。</p>
+                    <p style="margin: 5px 0; font-size: 13px; color: #666;">
+                        注意：模型性能会因不同的股票和时间周期而变化，建议定期重新评估模型表现。
+                    </p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 详细对比表格
+            st.subheader("📈 详细性能对比")
+            comparison_detail = pd.DataFrame({
+                '指标': ['RMSE (越低越好)', 'MAE (越低越好)', 'R² (越接近1越好)', '方向准确率 (越高越好)'],
+                'BiLSTM': [f"{bilstm_metrics['RMSE']:.4f}", f"{bilstm_metrics['MAE']:.4f}", 
+                          f"{bilstm_metrics['R²']:.4f}", f"{bilstm_metrics['Direction_Accuracy']:.2%}"],
+                'Transformer': [f"{trans_metrics['RMSE']:.4f}", f"{trans_metrics['MAE']:.4f}", 
+                               f"{trans_metrics['R²']:.4f}", f"{trans_metrics['Direction_Accuracy']:.2%}"],
+                '胜出者': [
+                    'Transformer' if trans_metrics['RMSE'] < bilstm_metrics['RMSE'] else 'BiLSTM',
+                    'Transformer' if trans_metrics['MAE'] < bilstm_metrics['MAE'] else 'BiLSTM',
+                    'Transformer' if trans_metrics['R²'] > bilstm_metrics['R²'] else 'BiLSTM',
+                    'Transformer' if trans_metrics['Direction_Accuracy'] > bilstm_metrics['Direction_Accuracy'] else 'BiLSTM'
+                ]
+            })
+            st.table(comparison_detail)
             
         except Exception as e:
             st.error(f"训练过程中出现错误: {str(e)}")
