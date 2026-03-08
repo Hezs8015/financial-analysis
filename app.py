@@ -129,6 +129,31 @@ if st.sidebar.button("🔍 查看模型原理", use_container_width=True):
     ---
     """)
 
+st.sidebar.header("📂 模型管理")
+
+# 加载已保存的模型
+if st.sidebar.checkbox("📥 加载已保存的模型"):
+    st.sidebar.info("""
+    **加载模型功能**：
+    如果之前保存过模型，可以直接加载使用，无需重新训练。
+    
+    ⚠️ 注意：加载模型后，请确保使用相同的数据和参数设置。
+    """)
+    
+    if st.sidebar.button("🔍 检查已保存的模型"):
+        import os
+        save_dir = 'saved_models'
+        if os.path.exists(save_dir):
+            files = os.listdir(save_dir)
+            if files:
+                st.sidebar.success(f"找到 {len(files)//3} 个保存的模型")
+                for f in sorted(set([f.replace('_model.pth', '').replace('_scaler.npy', '').replace('_history.json', '') for f in files])):
+                    st.sidebar.write(f"- {f}")
+            else:
+                st.sidebar.warning("暂无保存的模型")
+        else:
+            st.sidebar.warning("保存目录不存在")
+
 st.sidebar.header("⚙️ 配置参数")
 
 st.sidebar.subheader("📁 数据上传")
@@ -163,7 +188,7 @@ if st.sidebar.checkbox("ℹ️ 训练集比例是什么？"):
     """)
 
 st.sidebar.subheader("🧠 BiLSTM参数")
-bilstm_hidden = st.sidebar.slider("隐藏层大小", min_value=32, max_value=256, value=128, step=32)
+bilstm_hidden = st.sidebar.slider("隐藏层大小", min_value=32, max_value=512, value=256, step=32)
 if st.sidebar.checkbox("ℹ️ 隐藏层大小是什么？"):
     st.sidebar.info("""
     **隐藏层大小**：LSTM神经元的数量，决定模型的学习能力。
@@ -177,7 +202,7 @@ if st.sidebar.checkbox("ℹ️ 隐藏层大小是什么？"):
     - 复杂数据：128-256
     """)
 
-bilstm_layers = st.sidebar.slider("LSTM层数", min_value=1, max_value=4, value=2)
+bilstm_layers = st.sidebar.slider("LSTM层数", min_value=1, max_value=4, value=3)
 if st.sidebar.checkbox("ℹ️ LSTM层数是什么？"):
     st.sidebar.info("""
     **LSTM层数**：堆叠多少个LSTM层。
@@ -192,7 +217,7 @@ if st.sidebar.checkbox("ℹ️ LSTM层数是什么？"):
     """)
 
 st.sidebar.subheader("🤖 Transformer参数")
-trans_d_model = st.sidebar.slider("模型维度", min_value=32, max_value=256, value=128, step=32)
+trans_d_model = st.sidebar.slider("模型维度", min_value=32, max_value=512, value=256, step=32)
 if st.sidebar.checkbox("ℹ️ 模型维度是什么？"):
     st.sidebar.info("""
     **模型维度(d_model)**：Transformer内部特征向量的维度。
@@ -220,7 +245,7 @@ if st.sidebar.checkbox("ℹ️ 注意力头数是什么？"):
     - 常用值：4, 8, 16
     """)
 
-trans_layers = st.sidebar.slider("编码器层数", min_value=1, max_value=6, value=2)
+trans_layers = st.sidebar.slider("编码器层数", min_value=1, max_value=6, value=4)
 if st.sidebar.checkbox("ℹ️ 编码器层数是什么？"):
     st.sidebar.info("""
     **编码器层数**：堆叠多少个Transformer编码器块。
@@ -235,7 +260,7 @@ if st.sidebar.checkbox("ℹ️ 编码器层数是什么？"):
     """)
 
 st.sidebar.subheader("⚡ 训练参数")
-epochs = st.sidebar.slider("训练轮数", min_value=10, max_value=200, value=50, step=10)
+epochs = st.sidebar.slider("训练轮数", min_value=10, max_value=300, value=100, step=10)
 if st.sidebar.checkbox("ℹ️ 训练轮数是什么？"):
     st.sidebar.info("""
     **训练轮数**：模型遍历整个数据集的次数。
@@ -435,7 +460,37 @@ if st.button("🚀 开始训练模型", type="primary"):
             )
             
             st.success(f"数据准备完成! 训练集: {len(X_train)}, 测试集: {len(X_test)}")
-            st.write(f"使用的特征: {feature_cols}")
+            st.write(f"使用的特征数: {len(feature_cols)}")
+            
+            # 显示使用的技术指标
+            with st.expander("📊 点击查看使用的技术指标"):
+                st.markdown("""
+                **基础价格数据**: Open, High, Low, Close, Volume
+                
+                **趋势指标**:
+                - MA5, MA10, MA20, MA60 (移动平均线)
+                - Close_MA5_ratio, Close_MA20_ratio (价格与均线关系)
+                
+                **动量指标**:
+                - RSI (相对强弱指数)
+                - Momentum_5, Momentum_10, Momentum_20 (价格动量)
+                
+                **趋势跟踪**:
+                - MACD, MACD_signal, MACD_hist
+                
+                **波动率指标**:
+                - BB_upper, BB_middle, BB_lower, BB_position (布林带)
+                - Volatility_5, Volatility_20 (波动率)
+                
+                **成交量指标**:
+                - Volume_MA5, Volume_MA20, Volume_ratio
+                
+                **价格特征**:
+                - Price_range (日内波动)
+                - Price_change (价格变化率)
+                - Price_position (日内位置)
+                """)
+                st.info(f"总计 {len(feature_cols)} 个特征用于训练")
             
             input_size = len(feature_cols)
             
@@ -716,6 +771,33 @@ if st.button("🚀 开始训练模型", type="primary"):
                 ]
             })
             st.table(comparison_detail)
+            
+            # 模型保存功能
+            st.header("💾 模型管理")
+            
+            col_save1, col_save2 = st.columns(2)
+            
+            with col_save1:
+                if st.button("💾 保存训练好的模型", use_container_width=True):
+                    try:
+                        bilstm_path, bilstm_scaler, bilstm_hist = predictor.save_model('BiLSTM')
+                        trans_path, trans_scaler, trans_hist = predictor.save_model('Transformer')
+                        st.success(f"✅ 模型已保存！\n\nBiLSTM: {bilstm_path}\nTransformer: {trans_path}")
+                    except Exception as e:
+                        st.error(f"保存失败: {str(e)}")
+            
+            with col_save2:
+                if st.button("📊 查看训练历史", use_container_width=True):
+                    summary = predictor.get_training_summary()
+                    if summary:
+                        st.subheader("训练摘要")
+                        for item in summary:
+                            st.write(f"**{item['model_name']}**:")
+                            st.write(f"- 训练轮数: {item['epochs_trained']}")
+                            st.write(f"- 最终训练损失: {item['final_train_loss']:.6f}" if item['final_train_loss'] else "- 最终训练损失: N/A")
+                            st.write(f"- 最终验证损失: {item['final_val_loss']:.6f}" if item['final_val_loss'] else "- 最终验证损失: N/A")
+                    else:
+                        st.info("暂无训练记录")
             
         except Exception as e:
             st.error(f"训练过程中出现错误: {str(e)}")
