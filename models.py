@@ -190,7 +190,7 @@ class StockPredictor:
         
         return history
     
-    def evaluate_model(self, model_name, X_test, y_test):
+    def evaluate_model(self, model_name, X_test, y_test, inverse_transform=True):
         """评估模型"""
         if model_name not in self.models:
             raise ValueError(f"模型 '{model_name}' 未找到")
@@ -202,7 +202,7 @@ class StockPredictor:
             predictions = model(X_test).cpu().numpy().squeeze()
             actuals = y_test.cpu().numpy()
         
-        # 计算指标
+        # 计算指标（在标准化空间中计算）
         mse = mean_squared_error(actuals, predictions)
         rmse = np.sqrt(mse)
         mae = mean_absolute_error(actuals, predictions)
@@ -221,9 +221,25 @@ class StockPredictor:
             'Direction_Accuracy': direction_accuracy
         }
         
+        # 反标准化
+        if inverse_transform:
+            n_features = X_test.shape[2]  # 特征数量
+            pred_full = np.zeros((len(predictions), n_features))
+            pred_full[:, 0] = predictions  # 假设第一列是目标变量
+            
+            actual_full = np.zeros((len(actuals), n_features))
+            actual_full[:, 0] = actuals
+            
+            # 反标准化
+            pred_original = self.scaler.inverse_transform(pred_full)
+            actual_original = self.scaler.inverse_transform(actual_full)
+            
+            predictions = pred_original[:, 0]
+            actuals = actual_original[:, 0]
+        
         return metrics, predictions, actuals
     
-    def predict_future(self, model_name, last_sequence, days=30):
+    def predict_future(self, model_name, last_sequence, days=30, inverse_transform=True):
         """预测未来"""
         if model_name not in self.models:
             raise ValueError(f"模型 '{model_name}' 未找到")
@@ -248,4 +264,17 @@ class StockPredictor:
                 new_step[0] = pred  # 假设第一列是目标变量
                 current_sequence = np.vstack([current_sequence, new_step])
         
-        return np.array(predictions)
+        predictions = np.array(predictions)
+        
+        # 反标准化
+        if inverse_transform:
+            # 创建一个与原始数据相同形状的数组，填充预测值
+            n_features = last_sequence.shape[1]
+            pred_full = np.zeros((len(predictions), n_features))
+            pred_full[:, 0] = predictions  # 假设第一列是目标变量
+            
+            # 反标准化
+            pred_original = self.scaler.inverse_transform(pred_full)
+            predictions = pred_original[:, 0]
+        
+        return predictions

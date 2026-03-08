@@ -344,7 +344,7 @@ if st.button("🚀 开始训练模型", type="primary"):
             fig_pred.add_trace(go.Scatter(
                 x=test_dates, y=actuals,
                 mode='lines', name='实际值',
-                line=dict(color='black', width=2)
+                line=dict(color='white', width=2)
             ))
             fig_pred.add_trace(go.Scatter(
                 x=test_dates, y=bilstm_preds,
@@ -362,7 +362,9 @@ if st.button("🚀 开始训练模型", type="primary"):
                 xaxis_title='时间',
                 yaxis_title='价格',
                 hovermode='x unified',
-                template='plotly_white'
+                template='plotly_dark',
+                paper_bgcolor='#1e1e1e',
+                plot_bgcolor='#1e1e1e'
             )
             st.plotly_chart(fig_pred, use_container_width=True)
             
@@ -407,7 +409,9 @@ if st.button("🚀 开始训练模型", type="primary"):
                 xaxis_title='日期',
                 yaxis_title='价格',
                 hovermode='x unified',
-                template='plotly_white'
+                template='plotly_dark',
+                paper_bgcolor='#1e1e1e',
+                plot_bgcolor='#1e1e1e'
             )
             st.plotly_chart(fig_future, use_container_width=True)
             
