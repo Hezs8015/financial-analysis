@@ -138,24 +138,158 @@ use_sample = st.sidebar.checkbox("使用示例数据", value=False)
 
 st.sidebar.subheader("🔧 模型参数")
 seq_length = st.sidebar.slider("序列长度", min_value=10, max_value=120, value=60, step=10)
+if st.sidebar.checkbox("ℹ️ 序列长度是什么？"):
+    st.sidebar.info("""
+    **序列长度**：用过去多少天的数据来预测下一天。
+    
+    📌 示例：设置为60表示用过去60天的股价预测第61天
+    
+    💡 建议：
+    - 短期预测：20-40天
+    - 中期预测：60-90天
+    - 长期预测：100-120天
+    """)
+
 train_split = st.sidebar.slider("训练集比例", min_value=0.5, max_value=0.9, value=0.8, step=0.05)
+if st.sidebar.checkbox("ℹ️ 训练集比例是什么？"):
+    st.sidebar.info("""
+    **训练集比例**：多少数据用于训练，剩余用于测试。
+    
+    📌 示例：0.8表示80%数据训练，20%数据测试
+    
+    💡 建议：
+    - 数据量大：0.8-0.9
+    - 数据量小：0.7-0.8
+    """)
 
 st.sidebar.subheader("🧠 BiLSTM参数")
 bilstm_hidden = st.sidebar.slider("隐藏层大小", min_value=32, max_value=256, value=128, step=32)
+if st.sidebar.checkbox("ℹ️ 隐藏层大小是什么？"):
+    st.sidebar.info("""
+    **隐藏层大小**：LSTM神经元的数量，决定模型的学习能力。
+    
+    📌 通俗解释：
+    - 值越大 → 模型越复杂 → 能学习更复杂的模式
+    - 值越小 → 模型越简单 → 训练更快，不易过拟合
+    
+    💡 建议：
+    - 简单数据：64-128
+    - 复杂数据：128-256
+    """)
+
 bilstm_layers = st.sidebar.slider("LSTM层数", min_value=1, max_value=4, value=2)
+if st.sidebar.checkbox("ℹ️ LSTM层数是什么？"):
+    st.sidebar.info("""
+    **LSTM层数**：堆叠多少个LSTM层。
+    
+    📌 通俗解释：
+    - 层数越多 → 能学习更深层特征 → 但容易过拟合
+    - 层数越少 → 训练更快 → 但可能欠拟合
+    
+    💡 建议：
+    - 新手推荐：1-2层
+    - 经验丰富：2-3层
+    """)
 
 st.sidebar.subheader("🤖 Transformer参数")
 trans_d_model = st.sidebar.slider("模型维度", min_value=32, max_value=256, value=128, step=32)
+if st.sidebar.checkbox("ℹ️ 模型维度是什么？"):
+    st.sidebar.info("""
+    **模型维度(d_model)**：Transformer内部特征向量的维度。
+    
+    📌 通俗解释：
+    - 维度越高 → 表达能力越强 → 但需要更多数据
+    - 维度越低 → 计算越快 → 但可能表达能力不足
+    
+    💡 建议：
+    - 小数据集：64-128
+    - 大数据集：128-256
+    """)
+
 trans_heads = st.sidebar.slider("注意力头数", min_value=2, max_value=16, value=8, step=2)
+if st.sidebar.checkbox("ℹ️ 注意力头数是什么？"):
+    st.sidebar.info("""
+    **注意力头数**：同时进行多少次注意力计算。
+    
+    📌 通俗解释：
+    - 多个头 → 从不同角度观察数据 → 捕捉更多关系
+    - 类似多人从不同角度看同一张图
+    
+    💡 建议：
+    - 必须能被模型维度整除
+    - 常用值：4, 8, 16
+    """)
+
 trans_layers = st.sidebar.slider("编码器层数", min_value=1, max_value=6, value=2)
+if st.sidebar.checkbox("ℹ️ 编码器层数是什么？"):
+    st.sidebar.info("""
+    **编码器层数**：堆叠多少个Transformer编码器块。
+    
+    📌 通俗解释：
+    - 层数越多 → 特征提取能力越强 → 但训练更慢
+    - 类似深度神经网络的概念
+    
+    💡 建议：
+    - 新手推荐：1-2层
+    - 追求精度：3-6层
+    """)
 
 st.sidebar.subheader("⚡ 训练参数")
 epochs = st.sidebar.slider("训练轮数", min_value=10, max_value=200, value=50, step=10)
+if st.sidebar.checkbox("ℹ️ 训练轮数是什么？"):
+    st.sidebar.info("""
+    **训练轮数**：模型遍历整个数据集的次数。
+    
+    📌 通俗解释：
+    - 轮数太少 → 模型学不够 → 欠拟合
+    - 轮数太多 → 模型死记硬背 → 过拟合
+    
+    💡 建议：
+    - 快速测试：20-50轮
+    - 正式训练：50-100轮
+    """)
+
 batch_size = st.sidebar.slider("批次大小", min_value=8, max_value=128, value=32, step=8)
+if st.sidebar.checkbox("ℹ️ 批次大小是什么？"):
+    st.sidebar.info("""
+    **批次大小**：每次训练使用多少个样本。
+    
+    📌 通俗解释：
+    - 批次大 → 训练稳定 → 但需要更多显存
+    - 批次小 → 训练波动大 → 但可能找到更好的解
+    
+    💡 建议：
+    - 显存小：8-16
+    - 显存大：32-64
+    """)
+
 learning_rate = st.sidebar.select_slider("学习率", options=[0.0001, 0.0005, 0.001, 0.005, 0.01], value=0.001)
+if st.sidebar.checkbox("ℹ️ 学习率是什么？"):
+    st.sidebar.info("""
+    **学习率**：模型学习的步长大小。
+    
+    📌 通俗解释：
+    - 学习率大 → 学得快 → 但可能错过最优解
+    - 学习率小 → 学得慢 → 但更精细
+    
+    💡 建议：
+    - 保守选择：0.0001-0.001
+    - 快速收敛：0.001-0.01
+    """)
 
 st.sidebar.subheader("🔮 预测设置")
 prediction_days = st.sidebar.slider("预测未来天数", min_value=7, max_value=90, value=30, step=7)
+if st.sidebar.checkbox("ℹ️ 预测天数建议"):
+    st.sidebar.info("""
+    **预测未来天数**：预测未来多少天的股价。
+    
+    ⚠️ 重要提示：
+    - 短期预测（7-14天）相对准确
+    - 中期预测（30天）仅供参考
+    - 长期预测（60-90天）不确定性很高
+    
+    💡 股市有风险，预测结果仅供学习参考！
+    """)
 
 @st.cache_data
 def load_sample_data():
