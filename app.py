@@ -106,6 +106,19 @@ if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     if 'Date' in df.columns:
         df['Date'] = pd.to_datetime(df['Date'])
+    
+    # 数据清洗：将数值列转换为float类型
+    numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']
+    for col in numeric_columns:
+        if col in df.columns:
+            # 移除可能的逗号和货币符号，然后转换为float
+            if df[col].dtype == object:
+                df[col] = df[col].astype(str).str.replace(',', '').str.replace('$', '').str.replace('¥', '')
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # 删除包含NaN的行
+    df = df.dropna()
+    
     st.success(f"✅ 成功加载数据: {len(df)} 条记录")
 elif use_sample:
     df = load_sample_data()
@@ -136,15 +149,28 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("数据条数", len(df))
 with col2:
-    if 'Close' in df.columns:
-        st.metric("最新收盘价", f"{df['Close'].iloc[-1]:.2f}")
+    if 'Close' in df.columns and len(df) > 0:
+        try:
+            close_value = float(df['Close'].iloc[-1])
+            st.metric("最新收盘价", f"{close_value:.2f}")
+        except (ValueError, TypeError):
+            st.metric("最新收盘价", "N/A")
 with col3:
-    if 'Close' in df.columns:
-        change = ((df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0]) * 100
-        st.metric("总涨跌幅", f"{change:.2f}%")
+    if 'Close' in df.columns and len(df) > 0:
+        try:
+            close_last = float(df['Close'].iloc[-1])
+            close_first = float(df['Close'].iloc[0])
+            change = ((close_last - close_first) / close_first) * 100
+            st.metric("总涨跌幅", f"{change:.2f}%")
+        except (ValueError, TypeError, ZeroDivisionError):
+            st.metric("总涨跌幅", "N/A")
 with col4:
-    if 'Date' in df.columns:
-        st.metric("时间跨度", f"{(df['Date'].iloc[-1] - df['Date'].iloc[0]).days} 天")
+    if 'Date' in df.columns and len(df) > 0:
+        try:
+            days = (df['Date'].iloc[-1] - df['Date'].iloc[0]).days
+            st.metric("时间跨度", f"{days} 天")
+        except (ValueError, TypeError):
+            st.metric("时间跨度", "N/A")
 
 st.subheader("股价走势图")
 fig = go.Figure()
