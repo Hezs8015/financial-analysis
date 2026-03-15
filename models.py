@@ -12,8 +12,8 @@ from datetime import datetime
 
 
 class BiLSTMModel(nn.Module):
-    """双向LSTM模型"""
-    def __init__(self, input_size, hidden_size=128, num_layers=2, output_size=1, dropout=0.2):
+    """双向LSTM模型（优化版）"""
+    def __init__(self, input_size, hidden_size=64, num_layers=2, output_size=1, dropout=0.2):
         super(BiLSTMModel, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -69,8 +69,8 @@ class PositionalEncoding(nn.Module):
 
 
 class TransformerModel(nn.Module):
-    """Transformer模型"""
-    def __init__(self, input_size, d_model=128, nhead=8, num_layers=2, dim_feedforward=512, output_size=1, dropout=0.2):
+    """Transformer模型（优化版）"""
+    def __init__(self, input_size, d_model=64, nhead=8, num_layers=2, dim_feedforward=256, output_size=1, dropout=0.2):
         super(TransformerModel, self).__init__()
         
         self.d_model = d_model
@@ -130,7 +130,18 @@ class StockPredictor:
         if target_col not in df.columns:
             raise ValueError(f"目标列 '{target_col}' 不在数据中")
         
-        data = df[available_cols].values
+        # 选择数值列并清理数据
+        data = df[available_cols].copy()
+        
+        # 将所有列转换为数值类型，无法转换的设为NaN
+        for col in data.columns:
+            data[col] = pd.to_numeric(data[col], errors='coerce')
+        
+        # 删除包含NaN的行
+        data = data.dropna()
+        
+        # 转换为numpy数组
+        data = data.values
         
         # 标准化
         scaled_data = self.scaler.fit_transform(data)
@@ -158,41 +169,84 @@ class StockPredictor:
         
         return X_train, y_train, X_test, y_test, available_cols
     
-    def train_model(self, model_name, model, X_train, y_train, X_val, y_val, epochs=50, batch_size=32, lr=0.001):
-        """训练模型"""
+    def train_model(self, model_name, model, X_train, y_train, X_val, y_val, epochs=50, batch_size=32, lr=0.001, early_stopping_patience=10, verbose=True):
+        """训练模型（优化版）"""
         train_dataset = TensorDataset(X_train, y_train)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
         
-        history = {'train_loss': [], 'val_loss': []}
+        # 使用更高效的学习率调度器
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr * 0.01)
+        
+        # 早停设置
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_model_state = None
+        
+        history = {'train_loss': [], 'val_loss': [], 'lr': []}
         
         model.train()
         for epoch in range(epochs):
+            # 训练阶段
             train_losses = []
             for batch_X, batch_y in train_loader:
                 optimizer.zero_grad()
                 outputs = model(batch_X)
                 loss = criterion(outputs.squeeze(), batch_y)
                 loss.backward()
+                
+                # 梯度裁剪 - 防止梯度爆炸
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
                 optimizer.step()
                 train_losses.append(loss.item())
             
-            # 验证
+            # 验证阶段
             model.eval()
             with torch.no_grad():
                 val_outputs = model(X_val)
                 val_loss = criterion(val_outputs.squeeze(), y_val).item()
             
             avg_train_loss = np.mean(train_losses)
+            current_lr = optimizer.param_groups[0]['lr']
+            
             history['train_loss'].append(avg_train_loss)
             history['val_loss'].append(val_loss)
+            history['lr'].append(current_lr)
             
-            scheduler.step(val_loss)
+            # 更新学习率
+            scheduler.step()
+            
+            # 早停检查
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                # 保存最佳模型
+                best_model_state = model.state_dict().copy()
+            else:
+                patience_counter += 1
+                if verbose and patience_counter % 3 == 0:
+                    print(f"  {model_name}: 验证损失未改善 {patience_counter} 轮")
+                
+                if patience_counter >= early_stopping_patience:
+                    if verbose:
+                        print(f"  {model_name}: 早停于第 {epoch + 1} 轮")
+                    # 恢复最佳模型
+                    if best_model_state is not None:
+                        model.load_state_dict(best_model_state)
+                    break
+            
+            # 显示进度
+            if verbose and (epoch + 1) % 5 == 0:
+                print(f"  {model_name} Epoch [{epoch+1}/{epochs}] - Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}, LR: {current_lr:.6f}")
             
             model.train()
+        
+        # 确保使用最佳模型
+        if best_model_state is not None:
+            model.load_state_dict(best_model_state)
         
         self.models[model_name] = model
         self.histories[model_name] = history
