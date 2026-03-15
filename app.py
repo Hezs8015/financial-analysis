@@ -346,6 +346,16 @@ with main_container:
             except:
                 st.error("❌ 日期格式不正确，请确保 'Date' 列格式正确")
                 st.stop()
+            
+            # 清理数值列：将所有数值列转换为正确的类型
+            numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 删除数值列中包含NaN的行
+            df = df.dropna(subset=[col for col in numeric_cols if col in df.columns])
+            
             st.success("✅ 数据加载成功！")
         
         # 显示数据概览
@@ -391,45 +401,59 @@ with main_container:
         try:
             predictor = StockPredictor(seq_length=seq_length, device=device)
             X_train, y_train, X_test, y_test, feature_cols = predictor.prepare_data(df)
+            
+            # 检查数据量是否足够
+            if len(X_train) < 10:
+                st.error(f"❌ 训练数据不足！当前只有 {len(X_train)} 条训练数据，至少需要 10 条。")
+                st.info(f"💡 建议：增加数据量或减少序列长度（当前序列长度: {seq_length}）")
+                st.info(f"📊 原始数据行数: {len(df)}, 清理后可用数据: {len(X_train) + len(X_test)}")
+                st.stop()
+            
             st.success(f"数据准备完成! 训练集: {len(X_train)}, 测试集: {len(X_test)}")
             st.write(f"使用的特征: {feature_cols}")
+            st.info(f"📊 数据形状 - X_train: {X_train.shape}, X_test: {X_test.shape}")
             
             input_size = len(feature_cols)
             
             # 训练模型
             if st.button("🚀 开始训练模型", use_container_width=True):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                status_text.text("训练 BiLSTM 模型...")
-                bilstm_model = BiLSTMModel(
-                    input_size=input_size,
-                    hidden_size=bilstm_hidden,
-                    num_layers=bilstm_layers,
-                    output_size=1
-                ).to(device)
-                
-                bilstm_history = predictor.train_model(
-                    'BiLSTM', bilstm_model, X_train, y_train, X_test, y_test,
-                    epochs=epochs, batch_size=batch_size, lr=learning_rate
-                )
-                progress_bar.progress(50)
-                
-                status_text.text("训练 Transformer 模型...")
-                transformer_model = TransformerModel(
-                    input_size=input_size,
-                    d_model=trans_d_model,
-                    nhead=trans_heads,
-                    num_layers=trans_layers,
-                    output_size=1
-                ).to(device)
-                
-                trans_history = predictor.train_model(
-                    'Transformer', transformer_model, X_train, y_train, X_test, y_test,
-                    epochs=epochs, batch_size=batch_size, lr=learning_rate
-                )
-                progress_bar.progress(100)
-                status_text.text("训练完成!")
+                try:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    status_text.text("训练 BiLSTM 模型...")
+                    bilstm_model = BiLSTMModel(
+                        input_size=input_size,
+                        hidden_size=bilstm_hidden,
+                        num_layers=bilstm_layers,
+                        output_size=1
+                    ).to(device)
+                    
+                    bilstm_history = predictor.train_model(
+                        'BiLSTM', bilstm_model, X_train, y_train, X_test, y_test,
+                        epochs=epochs, batch_size=batch_size, lr=learning_rate
+                    )
+                    progress_bar.progress(50)
+                    
+                    status_text.text("训练 Transformer 模型...")
+                    transformer_model = TransformerModel(
+                        input_size=input_size,
+                        d_model=trans_d_model,
+                        nhead=trans_heads,
+                        num_layers=trans_layers,
+                        output_size=1
+                    ).to(device)
+                    
+                    trans_history = predictor.train_model(
+                        'Transformer', transformer_model, X_train, y_train, X_test, y_test,
+                        epochs=epochs, batch_size=batch_size, lr=learning_rate
+                    )
+                    progress_bar.progress(100)
+                    status_text.text("训练完成!")
+                except Exception as e:
+                    st.error(f"❌ 训练过程中出错: {str(e)}")
+                    import traceback
+                    st.error(f"详细错误信息: {traceback.format_exc()}")
                 
                 st.header("📊 模型性能对比")
                 
