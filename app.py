@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 import plotly.express as px
 from models import BiLSTMModel, TransformerModel, StockPredictor
 import io
+import yfinance as yf
 
 st.set_page_config(
     page_title="股市预测模型对比 - BiLSTM vs Transformer",
@@ -161,7 +162,45 @@ uploaded_file = st.sidebar.file_uploader("上传CSV文件", type=['csv'])
 
 use_sample = st.sidebar.checkbox("使用示例数据", value=False)
 
-st.sidebar.subheader("🔧 模型参数")
+st.sidebar.subheader("� 实时数据获取")
+use_realtime = st.sidebar.checkbox("使用实时数据", value=False)
+if use_realtime:
+    stock_symbol = st.sidebar.text_input("股票代码", value="AAPL", max_chars=10, help="输入股票代码，如AAPL, MSFT, GOOGL等")
+    
+    period_options = {
+        "1个月": "1mo",
+        "3个月": "3mo",
+        "6个月": "6mo",
+        "1年": "1y",
+        "2年": "2y",
+        "5年": "5y"
+    }
+    selected_period = st.sidebar.selectbox("数据周期", list(period_options.keys()), index=3)
+    
+    if st.sidebar.button("📥 获取实时数据", use_container_width=True):
+        with st.sidebar.spinner("正在获取实时数据..."):
+            try:
+                ticker = yf.Ticker(stock_symbol)
+                period = period_options[selected_period]
+                df = ticker.history(period=period)
+                
+                if df.empty:
+                    st.sidebar.error(f"❌ 无法获取 {stock_symbol} 的数据，请检查股票代码")
+                else:
+                    df = df.reset_index()
+                    df.columns = [col.capitalize() if col != 'Date' else col for col in df.columns]
+                    
+                    st.session_state['realtime_data'] = df
+                    st.session_state['data_source'] = f"实时数据: {stock_symbol} ({selected_period})"
+                    st.session_state['stock_symbol'] = stock_symbol
+                    st.session_state['period'] = period_options[selected_period]
+                    st.sidebar.success(f"✅ 成功获取 {stock_symbol} 的数据！")
+                    st.sidebar.info(f"📊 数据范围: {df['Date'].min().strftime('%Y-%m-%d')} 至 {df['Date'].max().strftime('%Y-%m-%d')}")
+                    st.sidebar.info(f"📈 数据行数: {len(df)}")
+            except Exception as e:
+                st.sidebar.error(f"❌ 获取数据失败: {str(e)}")
+
+st.sidebar.subheader("� 模型参数")
 seq_length = st.sidebar.slider("序列长度", min_value=10, max_value=120, value=60, step=10)
 if st.sidebar.checkbox("ℹ️ 序列长度是什么？"):
     st.sidebar.info("""
@@ -307,7 +346,10 @@ if st.sidebar.checkbox("ℹ️ 学习率是什么？"):
 main_container = st.container()
 
 with main_container:
-    if uploaded_file is not None or use_sample:
+    # 检查是否有数据来源
+    has_data = (uploaded_file is not None) or use_sample or ('realtime_data' in st.session_state)
+    
+    if has_data:
         # 加载数据
         if use_sample:
             # 生成示例数据
@@ -333,6 +375,10 @@ with main_container:
                 'Volume': volumes
             })
             st.success("✅ 示例数据加载成功！")
+        elif 'realtime_data' in st.session_state:
+            # 使用实时数据
+            df = st.session_state['realtime_data'].copy()
+            st.success(f"✅ {st.session_state.get('data_source', '实时数据')}加载成功！")
         else:
             # 加载用户上传的数据
             df = pd.read_csv(uploaded_file)
@@ -360,6 +406,33 @@ with main_container:
         
         # 显示数据概览
         st.header("📋 数据概览")
+        
+        # 显示数据来源和刷新按钮
+        col_info, col_refresh = st.columns([3, 1])
+        with col_info:
+            data_source = st.session_state.get('data_source', '上传文件')
+            st.info(f"📥 数据来源: {data_source}")
+        with col_refresh:
+            if 'realtime_data' in st.session_state and st.button("🔄 刷新数据", use_container_width=True):
+                with st.spinner("正在刷新数据..."):
+                    try:
+                        stock_symbol = st.session_state.get('stock_symbol', 'AAPL')
+                        period = st.session_state.get('period', '1y')
+                        ticker = yf.Ticker(stock_symbol)
+                        df_new = ticker.history(period=period)
+                        
+                        if not df_new.empty:
+                            df_new = df_new.reset_index()
+                            df_new.columns = [col.capitalize() if col != 'Date' else col for col in df_new.columns]
+                            
+                            st.session_state['realtime_data'] = df_new
+                            st.success("✅ 数据刷新成功！")
+                            st.rerun()
+                        else:
+                            st.error("❌ 刷新失败：无法获取最新数据")
+                    except Exception as e:
+                        st.error(f"❌ 刷新失败: {str(e)}")
+        
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("数据行数", len(df))
@@ -615,4 +688,4 @@ with main_container:
         except Exception as e:
             st.error(f"❌ 处理数据时出错: {str(e)}")
     else:
-        st.info("请上传CSV文件或使用示例数据开始分析")
+        st.info("请上传CSV文件、使用示例数据或获取实时数据开始分析")
