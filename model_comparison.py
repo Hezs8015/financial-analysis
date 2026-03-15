@@ -87,6 +87,71 @@ class TransformerModelPyTorch(nn.Module):
         return x
 
 
+class GatedResidual(nn.Module):
+    """门控残差：增强非线性表达，改善梯度流。"""
+    def __init__(self, d_model: int):
+        super(GatedResidual, self).__init__()
+        self.fc   = nn.Linear(d_model, d_model * 2)
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x):
+        gate, val = self.fc(self.norm(x)).chunk(2, dim=-1)
+        return x + torch.sigmoid(gate) * val
+
+
+class TransformerModelPyTorchV2(nn.Module):
+    """PyTorch版Transformer v2（增强版）"""
+    def __init__(self, input_size, d_model=128, nhead=4, num_layers=3, dim_feedforward=256, output_size=1, dropout=0.1):
+        super(TransformerModelPyTorchV2, self).__init__()
+        self.d_model = d_model
+        
+        # 输入嵌入
+        self.proj = nn.Linear(input_size, d_model)
+        
+        # 位置编码
+        self.pos_enc = PositionalEncoding(d_model, dropout)
+        
+        # Transformer编码器
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
+            norm_first=True   # Pre-LN：训练更稳定
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # 门控残差
+        self.gate = GatedResidual(d_model)
+        
+        # 多尺度聚合：最后时间步 + 全局均值池化
+        self.head = nn.Sequential(
+            nn.Linear(d_model * 2, d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, d_model // 2),
+            nn.GELU(),
+            nn.Linear(d_model // 2, output_size)
+        )
+
+    def _causal_mask(self, seq_len: int, device):
+        """上三角掩码：每个时间步只能看到过去。"""
+        mask = torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=1).bool()
+        return mask
+
+    def forward(self, x):                          # (B, T, F)
+        x = self.proj(x)
+        x = self.pos_enc(x)
+        mask = self._causal_mask(x.size(1), x.device)
+        x = self.encoder(x, mask=mask)             # (B, T, d)
+        x = self.gate(x)
+        last = x[:, -1, :]                         # 最后时间步
+        avg  = x.mean(dim=1)                       # 全局均值
+        x    = torch.cat([last, avg], dim=-1)      # 多尺度
+        return self.head(x).squeeze(-1)            # (B,)
+
+
 class PositionalEncoding(nn.Module):
     """位置编码"""
     def __init__(self, d_model, dropout=0.1, max_len=5000):

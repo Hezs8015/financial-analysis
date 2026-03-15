@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 from models import BiLSTMModel, TransformerModel, StockPredictor
-from model_comparison import MultiModelPredictor, BiLSTMModelPyTorch, TransformerModelPyTorch
+from model_comparison import MultiModelPredictor, BiLSTMModelPyTorch, TransformerModelPyTorch, TransformerModelPyTorchV2
 import io
 
 st.set_page_config(
@@ -180,6 +180,18 @@ if train_bilstm_pytorch:
     )
 else:
     bilstm_version = "v1 (8轮)"
+
+# Transformer版本选择
+if train_transformer_pytorch:
+    st.sidebar.markdown("**Transformer版本：**")
+    transformer_version = st.sidebar.selectbox(
+        "选择版本",
+        ["v1 (基础版)", "v2 (增强版)"],
+        index=0,
+        help="v1: 基础版Transformer | v2: 增强版（带门控残差、多尺度聚合、因果掩码）"
+    )
+else:
+    transformer_version = "v1 (基础版)"
 
 # Keras模型可选（需要TensorFlow）
 keras_available = False
@@ -464,7 +476,9 @@ with main_container:
                         version_suffix = bilstm_version.replace(" (", "-").replace(")", "")
                         selected_models.append(f'BiLSTM-PyTorch-{version_suffix}')
                     if train_transformer_pytorch:
-                        selected_models.append('Transformer-PyTorch')
+                        # 添加版本信息
+                        version_suffix = transformer_version.replace(" (", "-").replace(")", "")
+                        selected_models.append(f'Transformer-PyTorch-{version_suffix}')
                     if keras_available and train_bilstm_keras:
                         selected_models.append('BiLSTM-Keras')
                     
@@ -545,11 +559,34 @@ with main_container:
                                 
                                 model_results[model_name] = history
                                 
-                            elif model_name == 'Transformer-PyTorch':
+                            elif 'Transformer-PyTorch' in model_name:
+                                # 根据版本选择模型
+                                if transformer_version == "v1 (基础版)":
+                                    model_class = TransformerModelPyTorch
+                                    model_kwargs = {
+                                        'input_size': input_size, 
+                                        'd_model': trans_d_model, 
+                                        'nhead': trans_heads, 
+                                        'num_layers': trans_layers,
+                                        'output_size': 1,
+                                        'dropout': 0.2
+                                    }
+                                else:  # v2 (增强版)
+                                    model_class = TransformerModelPyTorchV2
+                                    model_kwargs = {
+                                        'input_size': input_size, 
+                                        'd_model': 128,  # v2默认参数
+                                        'nhead': 4,      # v2默认参数
+                                        'num_layers': 3,  # v2默认参数
+                                        'dim_feedforward': 256,  # v2默认参数
+                                        'output_size': 1,
+                                        'dropout': 0.1
+                                    }
+                                
                                 history = multi_predictor.train_pytorch_model(
-                                    model_name, TransformerModelPyTorch,
+                                    model_name, model_class,
                                     X_train_sub, y_train_sub, X_val, y_val,
-                                    model_kwargs={'input_size': input_size, 'd_model': trans_d_model, 'nhead': trans_heads, 'num_layers': trans_layers},
+                                    model_kwargs=model_kwargs,
                                     epochs=epochs, batch_size=batch_size, lr=learning_rate,
                                     verbose=False
                                 )
@@ -708,7 +745,8 @@ with main_container:
                     'BiLSTM-PyTorch-v1': '#00ff00',
                     'BiLSTM-PyTorch-v2': '#00cc00',
                     'BiLSTM-PyTorch-v3': '#009900',
-                    'Transformer-PyTorch': '#0080ff',
+                    'Transformer-PyTorch-v1': '#0080ff',
+                    'Transformer-PyTorch-v2': '#8000ff',
                     'BiLSTM-Keras': '#ff8000'
                 }
                 
