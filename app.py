@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 from models import BiLSTMModel, TransformerModel, StockPredictor
+from model_comparison import MultiModelPredictor, BiLSTMModelPyTorch, TransformerModelPyTorch
 import io
 
 st.set_page_config(
@@ -161,7 +162,22 @@ uploaded_file = st.sidebar.file_uploader("上传CSV文件", type=['csv'])
 
 use_sample = st.sidebar.checkbox("使用示例数据", value=False)
 
-st.sidebar.subheader("� 模型参数")
+st.sidebar.subheader("🔧 模型参数")
+
+# 模型选择
+st.sidebar.markdown("**选择要训练的模型：**")
+train_bilstm_pytorch = st.sidebar.checkbox("BiLSTM-PyTorch", value=True)
+train_transformer_pytorch = st.sidebar.checkbox("Transformer-PyTorch", value=True)
+
+try:
+    import tensorflow as tf
+    train_bilstm_keras = st.sidebar.checkbox("BiLSTM-Keras", value=False)
+    keras_available = True
+except ImportError:
+    train_bilstm_keras = False
+    keras_available = False
+    st.sidebar.info("ℹ️ BiLSTM-Keras 需要安装 TensorFlow")
+
 seq_length = st.sidebar.slider("序列长度", min_value=10, max_value=120, value=60, step=10)
 if st.sidebar.checkbox("ℹ️ 序列长度是什么？"):
     st.sidebar.info("""
@@ -434,49 +450,106 @@ with main_container:
                     status_text = st.empty()
                     epoch_text = st.empty()
                     
-                    # 定义进度回调函数
-                    def bilstm_progress(epoch, total_epochs, train_loss, val_loss, model_name):
-                        progress = int((epoch / total_epochs) * 50)
-                        progress_bar.progress(progress)
-                        epoch_text.text(f"BiLSTM - Epoch {epoch}/{total_epochs} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
+                    # 计算选中的模型数量
+                    selected_models = []
+                    if train_bilstm_pytorch:
+                        selected_models.append('BiLSTM-PyTorch')
+                    if train_transformer_pytorch:
+                        selected_models.append('Transformer-PyTorch')
+                    if keras_available and train_bilstm_keras:
+                        selected_models.append('BiLSTM-Keras')
                     
-                    def trans_progress(epoch, total_epochs, train_loss, val_loss, model_name):
-                        progress = 50 + int((epoch / total_epochs) * 50)
-                        progress_bar.progress(progress)
-                        epoch_text.text(f"Transformer - Epoch {epoch}/{total_epochs} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
+                    if len(selected_models) == 0:
+                        st.warning("⚠️ 请至少选择一个模型进行训练")
+                        st.stop()
                     
-                    status_text.text("训练 BiLSTM 模型...")
-                    bilstm_model = BiLSTMModel(
-                        input_size=input_size,
-                        hidden_size=bilstm_hidden,
-                        num_layers=bilstm_layers,
-                        output_size=1
-                    ).to(device)
+                    total_models = len(selected_models)
+                    model_results = {}
                     
-                    bilstm_history = predictor.train_model(
-                        'BiLSTM', bilstm_model, X_train_sub, y_train_sub, X_val, y_val,
-                        epochs=epochs, batch_size=batch_size, lr=learning_rate,
-                        early_stopping_patience=10, verbose=False, progress_callback=bilstm_progress
-                    )
+                    # 创建多模型预测器
+                    multi_predictor = MultiModelPredictor(seq_len=seq_length, device=device)
                     
-                    status_text.text("训练 Transformer 模型...")
-                    transformer_model = TransformerModel(
-                        input_size=input_size,
-                        d_model=trans_d_model,
-                        nhead=trans_heads,
-                        num_layers=trans_layers,
-                        output_size=1
-                    ).to(device)
-                    
-                    trans_history = predictor.train_model(
-                        'Transformer', transformer_model, X_train_sub, y_train_sub, X_val, y_val,
-                        epochs=epochs, batch_size=batch_size, lr=learning_rate,
-                        early_stopping_patience=10, verbose=False, progress_callback=trans_progress
-                    )
+                    for idx, model_name in enumerate(selected_models):
+                        status_text.text(f"训练 {model_name}... ({idx+1}/{total_models})")
+                        
+                        def make_progress_callback(model_idx, total_m, model_n):
+                            def callback(epoch, total_epochs, train_loss, val_loss, name):
+                                base_progress = (model_idx / total_m) * 100
+                                epoch_progress = (epoch / total_epochs) * (100 / total_m)
+                                progress = int(base_progress + epoch_progress)
+                                progress_bar.progress(min(progress, 99))
+                                epoch_text.text(f"{model_n} - Epoch {epoch}/{total_epochs} | Train: {train_loss:.6f} | Val: {val_loss:.6f}")
+                            return callback
+                        
+                        progress_cb = make_progress_callback(idx, total_models, model_name)
+                        
+                        try:
+                            if model_name == 'BiLSTM-PyTorch':
+                                history = multi_predictor.train_pytorch_model(
+                                    model_name, BiLSTMModelPyTorch,
+                                    X_train_sub, y_train_sub, X_val, y_val,
+                                    model_kwargs={'input_size': input_size, 'hidden_size': bilstm_hidden, 'num_layers': bilstm_layers},
+                                    epochs=epochs, batch_size=batch_size, lr=learning_rate,
+                                    verbose=False
+                                )
+                                model_results[model_name] = history
+                                
+                            elif model_name == 'Transformer-PyTorch':
+                                history = multi_predictor.train_pytorch_model(
+                                    model_name, TransformerModelPyTorch,
+                                    X_train_sub, y_train_sub, X_val, y_val,
+                                    model_kwargs={'input_size': input_size, 'd_model': trans_d_model, 'nhead': trans_heads, 'num_layers': trans_layers},
+                                    epochs=epochs, batch_size=batch_size, lr=learning_rate,
+                                    verbose=False
+                                )
+                                model_results[model_name] = history
+                                
+                            elif model_name == 'BiLSTM-Keras' and keras_available:
+                                # 使用Keras训练
+                                from model_comparison import BiLSTMModelKeras
+                                keras_model = BiLSTMModelKeras(seq_length, input_size, hidden_size=bilstm_hidden)
+                                keras_model.build_model()
+                                
+                                val_size_keras = int(0.1 * len(X_train_sub))
+                                if val_size_keras < 10:
+                                    val_size_keras = min(10, len(X_train_sub) // 5)
+                                
+                                X_val_keras = X_train_sub[-val_size_keras:]
+                                y_val_keras = y_train_sub[-val_size_keras:]
+                                X_train_keras = X_train_sub[:-val_size_keras]
+                                y_train_keras = y_train_sub[:-val_size_keras]
+                                
+                                history = keras_model.model.fit(
+                                    X_train_keras, y_train_keras,
+                                    validation_data=(X_val_keras, y_val_keras),
+                                    epochs=epochs, batch_size=batch_size,
+                                    callbacks=[tf.keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)],
+                                    verbose=0
+                                )
+                                
+                                multi_predictor.models[model_name] = keras_model
+                                multi_predictor.histories[model_name] = {
+                                    'train_loss': history.history['loss'],
+                                    'val_loss': history.history['val_loss']
+                                }
+                                model_results[model_name] = multi_predictor.histories[model_name]
+                            
+                        except Exception as e:
+                            st.error(f"❌ {model_name} 训练失败: {str(e)}")
+                            continue
                     
                     progress_bar.progress(100)
                     epoch_text.empty()
-                    status_text.text("训练完成!")
+                    status_text.text(f"训练完成! 成功训练 {len(model_results)}/{total_models} 个模型")
+                    
+                    # 保存到session state
+                    st.session_state['multi_predictor'] = multi_predictor
+                    st.session_state['model_results'] = model_results
+                    
+                except Exception as e:
+                    st.error(f"❌ 训练过程中出错: {str(e)}")
+                    import traceback
+                    st.error(f"详细错误信息: {traceback.format_exc()}")
                 except Exception as e:
                     st.error(f"❌ 训练过程中出错: {str(e)}")
                     import traceback
@@ -484,88 +557,191 @@ with main_container:
                 
                 st.header("📊 模型性能对比")
                 
-                col1, col2 = st.columns(2)
+                # 获取所有模型的评估结果
+                all_metrics = {}
+                all_predictions = {}
                 
-                with col1:
-                    st.subheader("🧠 BiLSTM 评估结果")
-                    bilstm_metrics, bilstm_preds, actuals = predictor.evaluate_model('BiLSTM', X_test, y_test)
+                if 'multi_predictor' in st.session_state:
+                    multi_predictor = st.session_state['multi_predictor']
+                    comparison_results = multi_predictor.compare_models(X_test, y_test)
                     
-                    for metric, value in bilstm_metrics.items():
-                        display_name = {
-                            'MSE': '均方误差 (MSE)',
-                            'RMSE': '均方根误差 (RMSE)',
-                            'MAE': '平均绝对误差 (MAE)',
-                            'R²': 'R² 评分',
-                            'Direction_Accuracy': '方向准确率'
-                        }.get(metric, metric)
-                        st.metric(display_name, f"{value:.4f}")
-                    
-                with col2:
-                    st.subheader("🤖 Transformer 评估结果")
-                    trans_metrics, trans_preds, _ = predictor.evaluate_model('Transformer', X_test, y_test)
-                    
-                    for metric, value in trans_metrics.items():
-                        display_name = {
-                            'MSE': '均方误差 (MSE)',
-                            'RMSE': '均方根误差 (RMSE)',
-                            'MAE': '平均绝对误差 (MAE)',
-                            'R²': 'R² 评分',
-                            'Direction_Accuracy': '方向准确率'
-                        }.get(metric, metric)
-                        st.metric(display_name, f"{value:.4f}")
+                    for model_name, result in comparison_results.items():
+                        if 'error' not in result:
+                            all_metrics[model_name] = result['metrics']
+                            all_predictions[model_name] = result['predictions']
+                
+                if len(all_metrics) == 0:
+                    st.error("❌ 没有可用的模型评估结果")
+                    st.stop()
+                
+                # 创建对比表格
+                st.subheader("📋 评估指标对比表")
+                
+                # 准备对比数据
+                metrics_df_data = []
+                for model_name, metrics in all_metrics.items():
+                    row = {'模型': model_name}
+                    row.update(metrics)
+                    metrics_df_data.append(row)
+                
+                metrics_df = pd.DataFrame(metrics_df_data)
+                
+                # 高亮最佳值
+                def highlight_best(s):
+                    if s.name == '模型':
+                        return [''] * len(s)
+                    # 对于R²和方向准确率，越高越好
+                    if s.name in ['R²', '方向准确率']:
+                        is_best = s == s.max()
+                    else:  # 对于误差指标，越低越好
+                        is_best = s == s.min()
+                    return ['background-color: rgba(0, 255, 0, 0.3)' if v else '' for v in is_best]
+                
+                st.dataframe(
+                    metrics_df.style.apply(highlight_best, axis=0).format({
+                        'MSE': '{:.6f}',
+                        'RMSE': '{:.6f}',
+                        'MAE': '{:.6f}',
+                        'R²': '{:.4f}',
+                        '方向准确率': '{:.4f}'
+                    }),
+                    use_container_width=True
+                )
+                
+                # 找出最佳模型
+                best_direction_model = max(all_metrics.items(), key=lambda x: x[1]['方向准确率'])
+                best_r2_model = max(all_metrics.items(), key=lambda x: x[1]['R²'])
+                best_rmse_model = min(all_metrics.items(), key=lambda x: x[1]['RMSE'])
+                
+                # 显示最佳模型
+                st.subheader("🏆 最佳模型")
+                
+                best_cols = st.columns(3)
+                with best_cols[0]:
+                    st.metric(
+                        "🎯 最佳方向预测",
+                        best_direction_model[0],
+                        f"{best_direction_model[1]['方向准确率']:.2%}"
+                    )
+                with best_cols[1]:
+                    st.metric(
+                        "📈 最佳拟合度 (R²)",
+                        best_r2_model[0],
+                        f"{best_r2_model[1]['R²']:.4f}"
+                    )
+                with best_cols[2]:
+                    st.metric(
+                        "📉 最小误差 (RMSE)",
+                        best_rmse_model[0],
+                        f"{best_rmse_model[1]['RMSE']:.4f}"
+                    )
                 
                 # 绘制预测对比图
                 st.subheader("📈 预测效果对比")
                 fig = go.Figure()
+                
+                # 获取实际值（使用第一个模型的实际值）
+                first_model = list(all_predictions.keys())[0]
+                actuals = comparison_results[first_model]['actuals']
                 
                 # 实际值
                 fig.add_trace(go.Scatter(
                     x=df['Date'].iloc[-len(actuals):],
                     y=actuals,
                     name='实际值',
-                    line=dict(color='white', width=2)
+                    line=dict(color='white', width=3)
                 ))
                 
-                # BiLSTM预测值
-                fig.add_trace(go.Scatter(
-                    x=df['Date'].iloc[-len(bilstm_preds):],
-                    y=bilstm_preds,
-                    name='BiLSTM 预测',
-                    line=dict(color='green', width=2, dash='dash')
-                ))
+                # 颜色映射
+                colors = {
+                    'BiLSTM-PyTorch': '#00ff00',
+                    'Transformer-PyTorch': '#0080ff',
+                    'BiLSTM-Keras': '#ff8000'
+                }
                 
-                # Transformer预测值
-                fig.add_trace(go.Scatter(
-                    x=df['Date'].iloc[-len(trans_preds):],
-                    y=trans_preds,
-                    name='Transformer 预测',
-                    line=dict(color='blue', width=2, dash='dot')
-                ))
+                # 添加每个模型的预测值
+                for model_name, preds in all_predictions.items():
+                    color = colors.get(model_name, '#808080')
+                    fig.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(preds):],
+                        y=preds,
+                        name=f'{model_name} 预测',
+                        line=dict(color=color, width=2, dash='dash')
+                    ))
                 
                 fig.update_layout(
                     xaxis_title='日期',
                     yaxis_title='价格',
-                    title='实际值 vs 预测值',
+                    title='实际值 vs 各模型预测值',
                     template='plotly_dark',
-                    height=500
+                    height=500,
+                    legend=dict(
+                        yanchor="top",
+                        y=0.99,
+                        xanchor="left",
+                        x=0.01
+                    )
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # 模型推荐
-                st.header("🏆 模型推荐")
+                # 训练历史对比
+                if 'model_results' in st.session_state:
+                    st.subheader("📉 训练历史对比")
+                    
+                    history_fig = go.Figure()
+                    
+                    for model_name, history in st.session_state['model_results'].items():
+                        if 'val_loss' in history and len(history['val_loss']) > 0:
+                            color = colors.get(model_name, '#808080')
+                            history_fig.add_trace(go.Scatter(
+                                y=history['val_loss'],
+                                name=f'{model_name} 验证损失',
+                                line=dict(color=color, width=2)
+                            ))
+                    
+                    history_fig.update_layout(
+                        xaxis_title='Epoch',
+                        yaxis_title='验证损失 (MSE)',
+                        title='模型训练收敛对比',
+                        template='plotly_dark',
+                        height=400
+                    )
+                    st.plotly_chart(history_fig, use_container_width=True)
                 
-                # 比较方向准确率
-                bilstm_dir_acc = bilstm_metrics['Direction_Accuracy']
-                trans_dir_acc = trans_metrics['Direction_Accuracy']
+                # 模型推荐总结
+                st.header("💡 模型选择建议")
                 
-                if bilstm_dir_acc > trans_dir_acc:
-                    st.success(f"🧠 **BiLSTM 模型**表现更好！")
-                    st.info(f"方向准确率: {bilstm_dir_acc:.2f} vs {trans_dir_acc:.2f}")
-                elif trans_dir_acc > bilstm_dir_acc:
-                    st.success(f"🤖 **Transformer 模型**表现更好！")
-                    st.info(f"方向准确率: {trans_dir_acc:.2f} vs {bilstm_dir_acc:.2f}")
-                else:
-                    st.info(f"两个模型表现相当！方向准确率: {bilstm_dir_acc:.2f}")
+                # 综合评分
+                st.markdown("### 📊 综合评分")
+                
+                for model_name, metrics in all_metrics.items():
+                    # 计算综合得分 (方向准确率权重最高)
+                    score = (
+                        metrics['方向准确率'] * 0.5 +
+                        metrics['R²'] * 0.3 +
+                        (1 - min(metrics['RMSE'] / 100, 1)) * 0.2
+                    )
+                    
+                    if score >= 0.7:
+                        emoji = "🟢"
+                        recommendation = "强烈推荐"
+                    elif score >= 0.5:
+                        emoji = "🟡"
+                        recommendation = "推荐使用"
+                    else:
+                        emoji = "🔴"
+                        recommendation = "建议优化"
+                    
+                    with st.expander(f"{emoji} {model_name} - {recommendation} (得分: {score:.2f})"):
+                        cols = st.columns(4)
+                        with cols[0]:
+                            st.metric("方向准确率", f"{metrics['方向准确率']:.2%}")
+                        with cols[1]:
+                            st.metric("R²", f"{metrics['R²']:.4f}")
+                        with cols[2]:
+                            st.metric("RMSE", f"{metrics['RMSE']:.4f}")
+                        with cols[3]:
+                            st.metric("MAE", f"{metrics['MAE']:.4f}")
                 
                 # 预测未来
                 st.header("🔮 未来预测")
