@@ -415,11 +415,35 @@ with main_container:
             
             input_size = len(feature_cols)
             
+            # 从训练集中划分验证集（用于早停）
+            val_size = int(0.1 * len(X_train))  # 10%作为验证集
+            if val_size < 10:
+                val_size = min(10, len(X_train) // 5)  # 至少10个样本
+            
+            X_val = X_train[-val_size:]
+            y_val = y_train[-val_size:]
+            X_train_sub = X_train[:-val_size]
+            y_train_sub = y_train[:-val_size]
+            
+            st.info(f"📊 训练子集: {len(X_train_sub)}, 验证集: {len(X_val)}, 测试集: {len(X_test)}")
+            
             # 训练模型
             if st.button("🚀 开始训练模型", use_container_width=True):
                 try:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
+                    epoch_text = st.empty()
+                    
+                    # 定义进度回调函数
+                    def bilstm_progress(epoch, total_epochs, train_loss, val_loss, model_name):
+                        progress = int((epoch / total_epochs) * 50)
+                        progress_bar.progress(progress)
+                        epoch_text.text(f"BiLSTM - Epoch {epoch}/{total_epochs} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
+                    
+                    def trans_progress(epoch, total_epochs, train_loss, val_loss, model_name):
+                        progress = 50 + int((epoch / total_epochs) * 50)
+                        progress_bar.progress(progress)
+                        epoch_text.text(f"Transformer - Epoch {epoch}/{total_epochs} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
                     
                     status_text.text("训练 BiLSTM 模型...")
                     bilstm_model = BiLSTMModel(
@@ -430,10 +454,10 @@ with main_container:
                     ).to(device)
                     
                     bilstm_history = predictor.train_model(
-                        'BiLSTM', bilstm_model, X_train, y_train, X_test, y_test,
-                        epochs=epochs, batch_size=batch_size, lr=learning_rate
+                        'BiLSTM', bilstm_model, X_train_sub, y_train_sub, X_val, y_val,
+                        epochs=epochs, batch_size=batch_size, lr=learning_rate,
+                        early_stopping_patience=10, verbose=False, progress_callback=bilstm_progress
                     )
-                    progress_bar.progress(50)
                     
                     status_text.text("训练 Transformer 模型...")
                     transformer_model = TransformerModel(
@@ -445,10 +469,13 @@ with main_container:
                     ).to(device)
                     
                     trans_history = predictor.train_model(
-                        'Transformer', transformer_model, X_train, y_train, X_test, y_test,
-                        epochs=epochs, batch_size=batch_size, lr=learning_rate
+                        'Transformer', transformer_model, X_train_sub, y_train_sub, X_val, y_val,
+                        epochs=epochs, batch_size=batch_size, lr=learning_rate,
+                        early_stopping_patience=10, verbose=False, progress_callback=trans_progress
                     )
+                    
                     progress_bar.progress(100)
+                    epoch_text.empty()
                     status_text.text("训练完成!")
                 except Exception as e:
                     st.error(f"❌ 训练过程中出错: {str(e)}")

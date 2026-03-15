@@ -169,7 +169,7 @@ class StockPredictor:
         
         return X_train, y_train, X_test, y_test, available_cols
     
-    def train_model(self, model_name, model, X_train, y_train, X_val, y_val, epochs=50, batch_size=32, lr=0.001, early_stopping_patience=10, verbose=True):
+    def train_model(self, model_name, model, X_train, y_train, X_val, y_val, epochs=50, batch_size=32, lr=0.001, early_stopping_patience=10, verbose=True, progress_callback=None):
         """训练模型（优化版）"""
         train_dataset = TensorDataset(X_train, y_train)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -218,6 +218,10 @@ class StockPredictor:
             
             # 更新学习率
             scheduler.step()
+            
+            # 回调函数（用于Streamlit进度更新）
+            if progress_callback is not None:
+                progress_callback(epoch + 1, epochs, avg_train_loss, val_loss, model_name)
             
             # 早停检查
             if val_loss < best_val_loss:
