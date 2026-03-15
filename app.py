@@ -169,14 +169,21 @@ st.sidebar.markdown("**选择要训练的模型：**")
 train_bilstm_pytorch = st.sidebar.checkbox("BiLSTM-PyTorch", value=True)
 train_transformer_pytorch = st.sidebar.checkbox("Transformer-PyTorch", value=True)
 
-try:
-    import tensorflow as tf
-    train_bilstm_keras = st.sidebar.checkbox("BiLSTM-Keras", value=False)
-    keras_available = True
-except ImportError:
-    train_bilstm_keras = False
-    keras_available = False
-    st.sidebar.info("ℹ️ BiLSTM-Keras 需要安装 TensorFlow")
+# BiLSTM版本选择（增量训练）
+if train_bilstm_pytorch:
+    st.sidebar.markdown("**BiLSTM训练版本：**")
+    bilstm_version = st.sidebar.selectbox(
+        "选择版本",
+        ["v1 (8轮)", "v2 (20轮)", "v3 (35轮)"],
+        index=0,
+        help="v1: 训练8轮 | v2: 基于v1继续训练12轮 | v3: 基于v2继续训练15轮"
+    )
+else:
+    bilstm_version = "v1 (8轮)"
+
+# Keras模型可选（需要TensorFlow）
+keras_available = False
+train_bilstm_keras = False
 
 seq_length = st.sidebar.slider("序列长度", min_value=10, max_value=120, value=60, step=10)
 if st.sidebar.checkbox("ℹ️ 序列长度是什么？"):
@@ -453,7 +460,9 @@ with main_container:
                     # 计算选中的模型数量
                     selected_models = []
                     if train_bilstm_pytorch:
-                        selected_models.append('BiLSTM-PyTorch')
+                        # 添加版本信息
+                        version_suffix = bilstm_version.replace(" (", "-").replace(")", "")
+                        selected_models.append(f'BiLSTM-PyTorch-{version_suffix}')
                     if train_transformer_pytorch:
                         selected_models.append('Transformer-PyTorch')
                     if keras_available and train_bilstm_keras:
@@ -484,14 +493,56 @@ with main_container:
                         progress_cb = make_progress_callback(idx, total_models, model_name)
                         
                         try:
-                            if model_name == 'BiLSTM-PyTorch':
-                                history = multi_predictor.train_pytorch_model(
-                                    model_name, BiLSTMModelPyTorch,
-                                    X_train_sub, y_train_sub, X_val, y_val,
-                                    model_kwargs={'input_size': input_size, 'hidden_size': bilstm_hidden, 'num_layers': bilstm_layers},
-                                    epochs=epochs, batch_size=batch_size, lr=learning_rate,
-                                    verbose=False
-                                )
+                            if 'BiLSTM-PyTorch' in model_name:
+                                # 根据版本选择训练轮数
+                                if bilstm_version == "v1 (8轮)":
+                                    bilstm_epochs = 8
+                                elif bilstm_version == "v2 (20轮)":
+                                    bilstm_epochs = 20
+                                else:  # v3 (35轮)
+                                    bilstm_epochs = 35
+                                
+                                # 增量训练：v2和v3需要加载之前训练的模型
+                                if bilstm_version in ["v2 (20轮)", "v3 (35轮)"]:
+                                    # 先训练基础模型（v1）
+                                    base_model = BiLSTMModelPyTorch(
+                                        input_size=input_size,
+                                        hidden_size=bilstm_hidden,
+                                        num_layers=bilstm_layers,
+                                        output_size=1
+                                    ).to(device)
+                                    
+                                    # 训练8轮作为基础
+                                    base_history = multi_predictor.train_pytorch_model(
+                                        f'{model_name}-base', BiLSTMModelPyTorch,
+                                        X_train_sub, y_train_sub, X_val, y_val,
+                                        model_kwargs={'input_size': input_size, 'hidden_size': bilstm_hidden, 'num_layers': bilstm_layers},
+                                        epochs=8, batch_size=batch_size, lr=learning_rate,
+                                        verbose=False
+                                    )
+                                    
+                                    # 加载基础模型继续训练
+                                    model_kwargs = {'input_size': input_size, 'hidden_size': bilstm_hidden, 'num_layers': bilstm_layers}
+                                    additional_epochs = bilstm_epochs - 8
+                                    
+                                    history = multi_predictor.train_pytorch_model(
+                                        model_name, BiLSTMModelPyTorch,
+                                        X_train_sub, y_train_sub, X_val, y_val,
+                                        model_kwargs=model_kwargs,
+                                        epochs=additional_epochs, batch_size=batch_size, lr=learning_rate,
+                                        verbose=False,
+                                        base_model=multi_predictor.models[f'{model_name}-base']
+                                    )
+                                else:
+                                    # v1：直接训练8轮
+                                    history = multi_predictor.train_pytorch_model(
+                                        model_name, BiLSTMModelPyTorch,
+                                        X_train_sub, y_train_sub, X_val, y_val,
+                                        model_kwargs={'input_size': input_size, 'hidden_size': bilstm_hidden, 'num_layers': bilstm_layers},
+                                        epochs=bilstm_epochs, batch_size=batch_size, lr=learning_rate,
+                                        verbose=False
+                                    )
+                                
                                 model_results[model_name] = history
                                 
                             elif model_name == 'Transformer-PyTorch':
@@ -654,7 +705,9 @@ with main_container:
                 
                 # 颜色映射
                 colors = {
-                    'BiLSTM-PyTorch': '#00ff00',
+                    'BiLSTM-PyTorch-v1': '#00ff00',
+                    'BiLSTM-PyTorch-v2': '#00cc00',
+                    'BiLSTM-PyTorch-v3': '#009900',
                     'Transformer-PyTorch': '#0080ff',
                     'BiLSTM-Keras': '#ff8000'
                 }

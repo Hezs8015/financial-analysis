@@ -217,8 +217,8 @@ class MultiModelPredictor:
         return X, y, scaler, available_cols, target_idx
     
     def train_pytorch_model(self, model_name, model_class, X_train, y_train, X_val, y_val, 
-                           model_kwargs, epochs=50, batch_size=32, lr=0.001, verbose=True):
-        """训练PyTorch模型"""
+                           model_kwargs, epochs=50, batch_size=32, lr=0.001, verbose=True, base_model=None):
+        """训练PyTorch模型（支持增量训练）"""
         
         # 转换为Tensor
         X_train_t = torch.FloatTensor(X_train).to(self.device)
@@ -226,8 +226,11 @@ class MultiModelPredictor:
         X_val_t = torch.FloatTensor(X_val).to(self.device)
         y_val_t = torch.FloatTensor(y_val).to(self.device)
         
-        # 创建模型
-        model = model_class(**model_kwargs).to(self.device)
+        # 创建或加载模型
+        if base_model is not None:
+            model = base_model
+        else:
+            model = model_class(**model_kwargs).to(self.device)
         
         # 训练设置
         train_dataset = TensorDataset(X_train_t, y_train_t)
