@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 from models import BiLSTMModel, TransformerModel, StockPredictor
-from model_comparison import MultiModelPredictor, BiLSTMModelPyTorch, TransformerModelPyTorch, TransformerModelPyTorchV2, TransformerModelPyTorchV3
+from model_comparison import MultiModelPredictor, BiLSTMModelPyTorch, TransformerModelPyTorch, TransformerModelPyTorchV2
 import io
 
 st.set_page_config(
