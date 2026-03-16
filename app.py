@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 from models import BiLSTMModel, TransformerModel, StockPredictor
-from model_comparison import MultiModelPredictor, BiLSTMModelPyTorch, TransformerModelPyTorch, TransformerModelPyTorchV2
+from model_comparison import MultiModelPredictor, BiLSTMModelPyTorch, TransformerModelPyTorch, TransformerModelPyTorchV2, TransformerModelPyTorchV3
 import io
 
 st.set_page_config(
@@ -417,7 +417,7 @@ with main_container:
             x=df['Date'],
             y=df['Close'],
             name='收盘价',
-            line=dict(color='white', width=2)
+            line=dict(color='#FF00FF', width=2)
         ))
         fig.update_layout(
             xaxis_title='日期',
@@ -732,27 +732,27 @@ with main_container:
                 first_model = list(all_predictions.keys())[0]
                 actuals = comparison_results[first_model]['actuals']
                 
-                # 实际值
+                # 实际值（使用高对比度颜色）
                 fig.add_trace(go.Scatter(
                     x=df['Date'].iloc[-len(actuals):],
                     y=actuals,
                     name='实际值',
-                    line=dict(color='white', width=3)
+                    line=dict(color='#FF00FF', width=3)
                 ))
                 
-                # 颜色映射
+                # 颜色映射（使用高对比度颜色，深色浅色模式都清晰）
                 colors = {
-                    'BiLSTM-PyTorch-v1': '#00ff00',
-                    'BiLSTM-PyTorch-v2': '#00cc00',
-                    'BiLSTM-PyTorch-v3': '#009900',
-                    'Transformer-PyTorch-v1': '#0080ff',
-                    'Transformer-PyTorch-v2': '#8000ff',
-                    'BiLSTM-Keras': '#ff8000'
+                    'BiLSTM-PyTorch-v1': '#00FF00',
+                    'BiLSTM-PyTorch-v2': '#00CC44',
+                    'BiLSTM-PyTorch-v3': '#00AA66',
+                    'Transformer-PyTorch-v1': '#00CCFF',
+                    'Transformer-PyTorch-v2': '#AA00FF',
+                    'BiLSTM-Keras': '#FF6600'
                 }
                 
                 # 添加每个模型的预测值
                 for model_name, preds in all_predictions.items():
-                    color = colors.get(model_name, '#808080')
+                    color = colors.get(model_name, '#FFFF00')
                     fig.add_trace(go.Scatter(
                         x=df['Date'].iloc[-len(preds):],
                         y=preds,
@@ -783,7 +783,7 @@ with main_container:
                     
                     for model_name, history in st.session_state['model_results'].items():
                         if 'val_loss' in history and len(history['val_loss']) > 0:
-                            color = colors.get(model_name, '#808080')
+                            color = colors.get(model_name, '#FFFF00')
                             history_fig.add_trace(go.Scatter(
                                 y=history['val_loss'],
                                 name=f'{model_name} 验证损失',
@@ -859,7 +859,7 @@ with main_container:
                         x=df['Date'],
                         y=df['Close'],
                         name='历史数据',
-                        line=dict(color='white', width=2)
+                        line=dict(color='#FF00FF', width=2)
                     ))
                     
                     # BiLSTM预测
@@ -867,7 +867,7 @@ with main_container:
                         x=future_dates,
                         y=bilstm_future,
                         name='BiLSTM 预测',
-                        line=dict(color='green', width=2, dash='dash')
+                        line=dict(color='#00FF00', width=2, dash='dash')
                     ))
                     
                     # Transformer预测
@@ -875,7 +875,7 @@ with main_container:
                         x=future_dates,
                         y=trans_future,
                         name='Transformer 预测',
-                        line=dict(color='blue', width=2, dash='dot')
+                        line=dict(color='#00CCFF', width=2, dash='dot')
                     ))
                     
                     fig.update_layout(
