@@ -227,6 +227,9 @@ if uploaded_file is not None:
                     feature_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
                     X, y, scaler, available_cols, target_idx = predictor.prepare_data(df, feature_cols, 'Close')
                     
+                    # 存储scaler到predictor中
+                    predictor.scalers['main'] = scaler
+                    
                     train_size = int(0.8 * len(X))
                     X_train, X_test = X[:train_size], X[train_size:]
                     y_train, y_test = y[:train_size], y[train_size:]
