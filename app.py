@@ -5,7 +5,11 @@ import torch
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
-from models import BiLSTMModel, TransformerModel, StockPredictor
+from models import (
+    BiLSTMModelV1, BiLSTMModelV2, BiLSTMModelV3,
+    TransformerModelV1, TransformerModelV2,
+    StockPredictor
+)
 import io
 
 st.set_page_config(
@@ -160,6 +164,35 @@ st.sidebar.subheader("📁 数据上传")
 uploaded_file = st.sidebar.file_uploader("上传CSV文件", type=['csv'])
 
 use_sample = st.sidebar.checkbox("使用示例数据", value=False)
+
+st.sidebar.subheader("🧠 模型选择")
+
+# BiLSTM版本选择
+bilstm_version = st.sidebar.selectbox(
+    "BiLSTM 版本",
+    options=["v1 (基础版)", "v2 (增强版)", "v3 (高级版)"],
+    index=1
+)
+if st.sidebar.checkbox("ℹ️ BiLSTM版本说明"):
+    st.sidebar.info("""
+    **BiLSTM版本对比：**
+    - **v1 (基础版)**: 1层LSTM，64隐藏单元，适合简单数据
+    - **v2 (增强版)**: 2层LSTM，128隐藏单元，适合一般数据
+    - **v3 (高级版)**: 3层LSTM，256隐藏单元，适合复杂数据
+    """)
+
+# Transformer版本选择
+transformer_version = st.sidebar.selectbox(
+    "Transformer 版本",
+    options=["v1 (基础版)", "v2 (增强版)"],
+    index=1
+)
+if st.sidebar.checkbox("ℹ️ Transformer版本说明"):
+    st.sidebar.info("""
+    **Transformer版本对比：**
+    - **v1 (基础版)**: 1层编码器，64模型维度，4注意力头
+    - **v2 (增强版)**: 2层编码器，128模型维度，8注意力头
+    """)
 
 st.sidebar.subheader("🔧 模型参数")
 seq_length = st.sidebar.slider("序列长度", min_value=10, max_value=120, value=60, step=10)
@@ -421,8 +454,27 @@ with main_container:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    status_text.text("训练 BiLSTM 模型...")
-                    bilstm_model = BiLSTMModel(
+                    # 选择BiLSTM模型版本
+                    if bilstm_version == "v1 (基础版)":
+                        bilstm_model_class = BiLSTMModelV1
+                        bilstm_model_name = "BiLSTM-PyTorch-v1"
+                    elif bilstm_version == "v2 (增强版)":
+                        bilstm_model_class = BiLSTMModelV2
+                        bilstm_model_name = "BiLSTM-PyTorch-v2"
+                    else:  # v3
+                        bilstm_model_class = BiLSTMModelV3
+                        bilstm_model_name = "BiLSTM-PyTorch-v3"
+                    
+                    # 选择Transformer模型版本
+                    if transformer_version == "v1 (基础版)":
+                        transformer_model_class = TransformerModelV1
+                        transformer_model_name = "Transformer-PyTorch-v1"
+                    else:  # v2
+                        transformer_model_class = TransformerModelV2
+                        transformer_model_name = "Transformer-PyTorch-v2"
+                    
+                    status_text.text(f"训练 {bilstm_version} 模型...")
+                    bilstm_model = bilstm_model_class(
                         input_size=input_size,
                         hidden_size=bilstm_hidden,
                         num_layers=bilstm_layers,
@@ -430,13 +482,13 @@ with main_container:
                     ).to(device)
                     
                     bilstm_history = predictor.train_model(
-                        'BiLSTM', bilstm_model, X_train, y_train, X_test, y_test,
+                        bilstm_model_name, bilstm_model, X_train, y_train, X_test, y_test,
                         epochs=epochs, batch_size=batch_size, lr=learning_rate
                     )
                     progress_bar.progress(50)
                     
-                    status_text.text("训练 Transformer 模型...")
-                    transformer_model = TransformerModel(
+                    status_text.text(f"训练 {transformer_version} 模型...")
+                    transformer_model = transformer_model_class(
                         input_size=input_size,
                         d_model=trans_d_model,
                         nhead=trans_heads,
@@ -445,7 +497,7 @@ with main_container:
                     ).to(device)
                     
                     trans_history = predictor.train_model(
-                        'Transformer', transformer_model, X_train, y_train, X_test, y_test,
+                        transformer_model_name, transformer_model, X_train, y_train, X_test, y_test,
                         epochs=epochs, batch_size=batch_size, lr=learning_rate
                     )
                     progress_bar.progress(100)
@@ -460,8 +512,8 @@ with main_container:
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.subheader("🧠 BiLSTM 评估结果")
-                    bilstm_metrics, bilstm_preds, actuals = predictor.evaluate_model('BiLSTM', X_test, y_test)
+                    st.subheader(f"🧠 BiLSTM {bilstm_version} 评估结果")
+                    bilstm_metrics, bilstm_preds, actuals = predictor.evaluate_model(bilstm_model_name, X_test, y_test)
                     
                     for metric, value in bilstm_metrics.items():
                         display_name = {
@@ -472,10 +524,10 @@ with main_container:
                             'Direction_Accuracy': '方向准确率'
                         }.get(metric, metric)
                         st.metric(display_name, f"{value:.4f}")
-                    
+                
                 with col2:
-                    st.subheader("🤖 Transformer 评估结果")
-                    trans_metrics, trans_preds, _ = predictor.evaluate_model('Transformer', X_test, y_test)
+                    st.subheader(f"🤖 Transformer {transformer_version} 评估结果")
+                    trans_metrics, trans_preds, _ = predictor.evaluate_model(transformer_model_name, X_test, y_test)
                     
                     for metric, value in trans_metrics.items():
                         display_name = {
@@ -503,7 +555,7 @@ with main_container:
                 fig.add_trace(go.Scatter(
                     x=df['Date'].iloc[-len(bilstm_preds):],
                     y=bilstm_preds,
-                    name='BiLSTM 预测',
+                    name=f'BiLSTM {bilstm_version} 预测',
                     line=dict(color='green', width=2, dash='dash')
                 ))
                 
@@ -511,7 +563,7 @@ with main_container:
                 fig.add_trace(go.Scatter(
                     x=df['Date'].iloc[-len(trans_preds):],
                     y=trans_preds,
-                    name='Transformer 预测',
+                    name=f'Transformer {transformer_version} 预测',
                     line=dict(color='blue', width=2, dash='dot')
                 ))
                 

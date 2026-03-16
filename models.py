@@ -11,10 +11,10 @@ import json
 from datetime import datetime
 
 
-class BiLSTMModel(nn.Module):
-    """双向LSTM模型（优化版）"""
-    def __init__(self, input_size, hidden_size=64, num_layers=2, output_size=1, dropout=0.2):
-        super(BiLSTMModel, self).__init__()
+class BiLSTMModelV1(nn.Module):
+    """BiLSTM模型 v1 (基础版)"""
+    def __init__(self, input_size, hidden_size=64, num_layers=1, output_size=1, dropout=0.1):
+        super(BiLSTMModelV1, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         
@@ -47,6 +47,184 @@ class BiLSTMModel(nn.Module):
         # 全连接层
         out = self.fc(out)
         return out
+
+
+class BiLSTMModelV2(nn.Module):
+    """BiLSTM模型 v2 (增强版)"""
+    def __init__(self, input_size, hidden_size=128, num_layers=2, output_size=1, dropout=0.2):
+        super(BiLSTMModelV2, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        # 双向LSTM
+        self.bilstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0,
+            bidirectional=True
+        )
+        
+        # 全连接层
+        self.fc1 = nn.Linear(hidden_size * 2, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_size)
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
+        
+    def forward(self, x):
+        # x: (batch, seq_len, input_size)
+        h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size).to(x.device)
+        c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size).to(x.device)
+        
+        # LSTM输出: (batch, seq_len, hidden_size * 2)
+        out, _ = self.bilstm(x, (h0, c0))
+        
+        # 取最后一个时间步
+        out = out[:, -1, :]
+        out = self.dropout(out)
+        
+        # 全连接层
+        out = self.relu(self.fc1(out))
+        out = self.dropout(out)
+        out = self.fc2(out)
+        return out
+
+
+class BiLSTMModelV3(nn.Module):
+    """BiLSTM模型 v3 (高级版)"""
+    def __init__(self, input_size, hidden_size=256, num_layers=3, output_size=1, dropout=0.3):
+        super(BiLSTMModelV3, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        # 双向LSTM
+        self.bilstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0,
+            bidirectional=True
+        )
+        
+        # 全连接层
+        self.fc1 = nn.Linear(hidden_size * 2, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size // 2)
+        self.fc3 = nn.Linear(hidden_size // 2, output_size)
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
+        
+    def forward(self, x):
+        # x: (batch, seq_len, input_size)
+        h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size).to(x.device)
+        c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size).to(x.device)
+        
+        # LSTM输出: (batch, seq_len, hidden_size * 2)
+        out, _ = self.bilstm(x, (h0, c0))
+        
+        # 取最后一个时间步
+        out = out[:, -1, :]
+        out = self.dropout(out)
+        
+        # 全连接层
+        out = self.relu(self.fc1(out))
+        out = self.dropout(out)
+        out = self.relu(self.fc2(out))
+        out = self.dropout(out)
+        out = self.fc3(out)
+        return out
+
+
+class TransformerModelV1(nn.Module):
+    """Transformer模型 v1 (基础版)"""
+    def __init__(self, input_size, d_model=64, nhead=4, num_layers=1, dim_feedforward=128, output_size=1, dropout=0.1):
+        super(TransformerModelV1, self).__init__()
+        
+        self.d_model = d_model
+        
+        # 输入投影
+        self.input_projection = nn.Linear(input_size, d_model)
+        
+        # 位置编码
+        self.pos_encoder = PositionalEncoding(d_model)
+        
+        # Transformer编码器
+        encoder_layers = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers)
+        
+        # 输出层
+        self.fc = nn.Linear(d_model, output_size)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x):
+        # x: (batch, seq_len, input_size)
+        x = self.input_projection(x) * math.sqrt(self.d_model)
+        x = self.pos_encoder(x)
+        
+        # Transformer编码
+        x = self.transformer_encoder(x)
+        
+        # 取序列最后一个时间步
+        x = x[:, -1, :]
+        x = self.dropout(x)
+        
+        output = self.fc(x)
+        return output
+
+
+class TransformerModelV2(nn.Module):
+    """Transformer模型 v2 (增强版)"""
+    def __init__(self, input_size, d_model=128, nhead=8, num_layers=2, dim_feedforward=256, output_size=1, dropout=0.2):
+        super(TransformerModelV2, self).__init__()
+        
+        self.d_model = d_model
+        
+        # 输入投影
+        self.input_projection = nn.Linear(input_size, d_model)
+        
+        # 位置编码
+        self.pos_encoder = PositionalEncoding(d_model)
+        
+        # Transformer编码器
+        encoder_layers = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers)
+        
+        # 输出层
+        self.fc1 = nn.Linear(d_model, d_model // 2)
+        self.fc2 = nn.Linear(d_model // 2, output_size)
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
+        
+    def forward(self, x):
+        # x: (batch, seq_len, input_size)
+        x = self.input_projection(x) * math.sqrt(self.d_model)
+        x = self.pos_encoder(x)
+        
+        # Transformer编码
+        x = self.transformer_encoder(x)
+        
+        # 取序列最后一个时间步
+        x = x[:, -1, :]
+        x = self.dropout(x)
+        
+        # 全连接层
+        x = self.relu(self.fc1(x))
+        x = self.dropout(x)
+        output = self.fc2(x)
+        return output
 
 
 class PositionalEncoding(nn.Module):
