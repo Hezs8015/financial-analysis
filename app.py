@@ -85,6 +85,28 @@ else:
 seq_length = st.sidebar.slider("序列长度", min_value=10, max_value=120, value=60, step=10)
 epochs = st.sidebar.slider("训练轮数", min_value=10, max_value=200, value=50, step=10)
 
+# 模型参数设置
+st.sidebar.header("⚙️ 模型参数")
+
+# BiLSTM参数
+st.sidebar.markdown("**BiLSTM参数：**")
+bilstm_hidden_size = st.sidebar.slider("隐藏层大小", min_value=32, max_value=512, value=64, step=32)
+bilstm_num_layers = st.sidebar.slider("层数", min_value=1, max_value=4, value=2, step=1)
+
+# Transformer参数
+if train_transformer_pytorch:
+    st.sidebar.markdown("**Transformer参数：**")
+    trans_d_model = st.sidebar.slider("模型维度 (d_model)", min_value=32, max_value=256, value=64, step=32)
+    trans_heads = st.sidebar.slider("注意力头数 (nhead)", min_value=2, max_value=16, value=8, step=2)
+    trans_layers = st.sidebar.slider("编码器层数", min_value=1, max_value=6, value=2, step=1)
+    trans_ff_dim = st.sidebar.slider("前馈网络维度", min_value=128, max_value=1024, value=256, step=128)
+else:
+    # 默认值，防止未定义错误
+    trans_d_model = 64
+    trans_heads = 8
+    trans_layers = 2
+    trans_ff_dim = 256
+
 st.sidebar.header("📊 模型说明")
 model_info = st.sidebar.radio("选择模型查看详情", ["BiLSTM", "Transformer"])
 
@@ -187,11 +209,11 @@ if uploaded_file is not None:
                     try:
                         input_size = len(available_cols)
                         if bilstm_version == "v1 (基础版)":
-                            model_kwargs = {'input_size': input_size, 'hidden_size': 64, 'num_layers': 2}
+                            model_kwargs = {'input_size': input_size, 'hidden_size': bilstm_hidden_size, 'num_layers': bilstm_num_layers}
                         elif bilstm_version == "v2 (增强版)":
-                            model_kwargs = {'input_size': input_size, 'hidden_size': 128, 'num_layers': 3}
+                            model_kwargs = {'input_size': input_size, 'hidden_size': bilstm_hidden_size, 'num_layers': bilstm_num_layers}
                         else:  # v3
-                            model_kwargs = {'input_size': input_size, 'hidden_size': 256, 'num_layers': 4}
+                            model_kwargs = {'input_size': input_size, 'hidden_size': bilstm_hidden_size, 'num_layers': bilstm_num_layers}
                         
                         history = predictor.train_pytorch_model(
                             f'BiLSTM-PyTorch-{bilstm_version.split()[0]}', BiLSTMModelPyTorch,
@@ -212,9 +234,9 @@ if uploaded_file is not None:
                         try:
                             input_size = len(available_cols)
                             if transformer_version == "v1 (基础版)":
-                                model_kwargs = {'input_size': input_size, 'd_model': 64, 'nhead': 8, 'num_layers': 2}
+                                model_kwargs = {'input_size': input_size, 'd_model': trans_d_model, 'nhead': trans_heads, 'num_layers': trans_layers, 'dim_feedforward': trans_ff_dim}
                             else:  # v2
-                                model_kwargs = {'input_size': input_size, 'd_model': 128, 'nhead': 4, 'num_layers': 3}
+                                model_kwargs = {'input_size': input_size, 'd_model': trans_d_model, 'nhead': trans_heads, 'num_layers': trans_layers, 'dim_feedforward': trans_ff_dim}
                             
                             history = predictor.train_pytorch_model(
                                 f'Transformer-PyTorch-{transformer_version.split()[0]}', 
