@@ -90,16 +90,58 @@ st.sidebar.header("⚙️ 模型参数")
 
 # BiLSTM参数
 st.sidebar.markdown("**BiLSTM参数：**")
-bilstm_hidden_size = st.sidebar.slider("隐藏层大小", min_value=32, max_value=512, value=64, step=32)
-bilstm_num_layers = st.sidebar.slider("层数", min_value=1, max_value=4, value=2, step=1)
+bilstm_hidden_size = st.sidebar.slider(
+    "隐藏层大小", 
+    min_value=32, 
+    max_value=512, 
+    value=64, 
+    step=32,
+    help="隐藏层神经元数量，影响模型容量。值越大模型越复杂，可能过拟合。"
+)
+bilstm_num_layers = st.sidebar.slider(
+    "层数", 
+    min_value=1, 
+    max_value=4, 
+    value=2, 
+    step=1,
+    help="LSTM堆叠层数，更多层可以捕捉更复杂的特征。"
+)
 
 # Transformer参数
 if train_transformer_pytorch:
     st.sidebar.markdown("**Transformer参数：**")
-    trans_d_model = st.sidebar.slider("模型维度 (d_model)", min_value=32, max_value=256, value=64, step=32)
-    trans_heads = st.sidebar.slider("注意力头数 (nhead)", min_value=2, max_value=16, value=8, step=2)
-    trans_layers = st.sidebar.slider("编码器层数", min_value=1, max_value=6, value=2, step=1)
-    trans_ff_dim = st.sidebar.slider("前馈网络维度", min_value=128, max_value=1024, value=256, step=128)
+    trans_d_model = st.sidebar.slider(
+        "模型维度 (d_model)", 
+        min_value=32, 
+        max_value=256, 
+        value=64, 
+        step=32,
+        help="Transformer的隐藏层维度，影响模型表达能力。"
+    )
+    trans_heads = st.sidebar.slider(
+        "注意力头数 (nhead)", 
+        min_value=2, 
+        max_value=16, 
+        value=8, 
+        step=2,
+        help="多头注意力的头数，更多头可以关注不同的特征。"
+    )
+    trans_layers = st.sidebar.slider(
+        "编码器层数", 
+        min_value=1, 
+        max_value=6, 
+        value=2, 
+        step=1,
+        help="Transformer编码器的层数，更多层可以建模更复杂的依赖关系。"
+    )
+    trans_ff_dim = st.sidebar.slider(
+        "前馈网络维度", 
+        min_value=128, 
+        max_value=1024, 
+        value=256, 
+        step=128,
+        help="前馈网络的隐藏层维度，影响模型的非线性表达能力。"
+    )
 else:
     # 默认值，防止未定义错误
     trans_d_model = 64
@@ -171,7 +213,9 @@ if uploaded_file is not None:
                 yaxis_title='价格',
                 title='股票价格走势',
                 template='plotly_dark',
-                height=400
+                height=600,
+                width=None,  # 自动适应容器宽度
+                margin=dict(l=20, r=20, t=60, b=40)
             )
             st.plotly_chart(fig, use_container_width=True)
             
@@ -312,12 +356,18 @@ if uploaded_file is not None:
                             yaxis_title='价格',
                             title='实际值 vs 各模型预测值',
                             template='plotly_dark',
-                            height=500,
+                            height=600,
+                            width=None,  # 自动适应容器宽度
+                            margin=dict(l=20, r=20, t=60, b=40),
                             legend=dict(
                                 yanchor="top",
                                 y=0.99,
                                 xanchor="left",
-                                x=0.01
+                                x=0.01,
+                                font=dict(size=12),
+                                bgcolor='rgba(0, 0, 0, 0.5)',
+                                bordercolor='rgba(255, 255, 255, 0.1)',
+                                borderwidth=1
                             )
                         )
                         st.plotly_chart(fig, use_container_width=True)
@@ -342,9 +392,77 @@ if uploaded_file is not None:
                                 yaxis_title='验证损失',
                                 title='训练过程对比',
                                 template='plotly_dark',
-                                height=400
+                                height=500,
+                                width=None,  # 自动适应容器宽度
+                                margin=dict(l=20, r=20, t=60, b=40),
+                                legend=dict(
+                                    yanchor="top",
+                                    y=0.99,
+                                    xanchor="left",
+                                    x=0.01,
+                                    font=dict(size=12),
+                                    bgcolor='rgba(0, 0, 0, 0.5)',
+                                    bordercolor='rgba(255, 255, 255, 0.1)',
+                                    borderwidth=1
+                                )
                             )
                             st.plotly_chart(history_fig, use_container_width=True)
+                        
+                        # 模型建议
+                        st.subheader("💡 模型选择建议")
+                        
+                        # 分析最佳模型
+                        best_model = None
+                        best_score = -float('inf')
+                        model_scores = {}
+                        
+                        for model_name, result in comparison_results.items():
+                            if 'error' not in result:
+                                metrics = result['metrics']
+                                # 综合评分：方向准确率*0.6 + R²*0.3 + (1/RMSE)*0.1
+                                score = metrics['方向准确率'] * 0.6 + max(0, metrics['R²']) * 0.3 + (1/metrics['RMSE']) * 0.1
+                                model_scores[model_name] = score
+                                if score > best_score:
+                                    best_score = score
+                                    best_model = model_name
+                        
+                        if best_model:
+                            best_metrics = comparison_results[best_model]['metrics']
+                            
+                            st.markdown(f"""
+                            <div style="background-color: #f0f8ff; padding: 15px; border-radius: 10px; border-left: 5px solid #1e90ff;">
+                                <h4 style="color: #1e90ff;">🏆 推荐模型：{best_model}</h4>
+                                <ul>
+                                    <li><strong>方向准确率：</strong>{best_metrics['方向准确率']:.2%} - 预测股价涨跌的能力</li>
+                                    <li><strong>R²：</strong>{best_metrics['R²']:.4f} - 模型解释方差的能力</li>
+                                    <li><strong>RMSE：</strong>{best_metrics['RMSE']:.4f} - 预测误差的大小</li>
+                                    <li><strong>MAE：</strong>{best_metrics['MAE']:.4f} - 平均预测误差</li>
+                                </ul>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # 模型选择建议
+                            if 'BiLSTM' in best_model:
+                                st.info("**BiLSTM 模型优势：** 擅长捕捉时间序列的长期依赖关系，在股价预测任务中表现稳定。适合数据量适中的场景。")
+                            elif 'Transformer' in best_model:
+                                st.info("**Transformer 模型优势：** 利用自注意力机制捕捉全局依赖，并行计算效率高。适合数据量较大的场景。")
+                            
+                            # 使用建议
+                            st.markdown("""
+                            ### 📝 使用建议
+                            
+                            **短期预测（1-5天）：**
+                            - 适合日内交易和短期趋势判断
+                            - 建议关注方向准确率指标
+                            
+                            **中期预测（5-20天）：**
+                            - 适合波段操作和趋势跟随
+                            - 建议综合考虑所有指标
+                            
+                            **长期预测（20天以上）：**
+                            - 适合资产配置和长期投资
+                            - 建议重点关注R²指标
+                            """)
                         
                         # 保存结果到session state
                         st.session_state['predictor'] = predictor
@@ -457,7 +575,19 @@ if 'predictor' in st.session_state:
             yaxis_title='价格',
             title='未来价格预测',
             template='plotly_dark',
-            height=500
+            height=600,
+            width=None,  # 自动适应容器宽度
+            margin=dict(l=20, r=20, t=60, b=40),
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=0.01,
+                font=dict(size=12),
+                bgcolor='rgba(0, 0, 0, 0.5)',
+                bordercolor='rgba(255, 255, 255, 0.1)',
+                borderwidth=1
+            )
         )
         st.plotly_chart(fig, use_container_width=True)
         
