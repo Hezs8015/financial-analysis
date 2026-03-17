@@ -323,6 +323,43 @@ class StockTransformerV3(nn.Module):
         x    = torch.cat([last, avg, max_], dim=-1) # 多尺度融合
         return self.head(x).squeeze(-1)            # (B,)
 
+
+# ──────────────────────────────────────────────
+# BiLSTM 模型（用于对比）
+# ──────────────────────────────────────────────
+class StockBiLSTM(nn.Module):
+    """BiLSTM 股票预测模型"""
+    def __init__(self, n_feat: int, hidden_size: int = 128, 
+                 num_layers: int = 2, dropout: float = 0.2):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        self.bilstm = nn.LSTM(
+            input_size=n_feat,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0,
+            bidirectional=True
+        )
+        
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_size * 2, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_size // 2, 1)
+        )
+    
+    def forward(self, x):  # (B, T, F)
+        lstm_out, _ = self.bilstm(x)
+        out = self.dropout(lstm_out[:, -1, :])  # 取最后一个时间步
+        out = self.fc(out)
+        return out.squeeze(-1)  # (B,)
+
 # ──────────────────────────────────────────────
 # 4. 训练 & 评估
 # ──────────────────────────────────────────────
@@ -372,21 +409,25 @@ def main():
 
     n      = len(X_all)
     split  = int(n * SPLIT)
-    X_tr, X_te = X_all[:split], X_all[split:]
-    y_tr, y_te = y_all[:split], y_all[split:]
+    val_split = int(n * 0.9)
+    X_tr, X_val, X_te = X_all[:split], X_all[split:val_split], X_all[val_split:]
+    y_tr, y_val, y_te = y_all[:split], y_all[split:val_split], y_all[val_split:]
 
-    # RobustScaler：对离群值不敏感
     x_scaler = RobustScaler()
     y_scaler = RobustScaler()
 
     X_tr_s = x_scaler.fit_transform(X_tr)
+    X_val_s = x_scaler.transform(X_val)
     X_te_s = x_scaler.transform(X_te)
     y_tr_s = y_scaler.fit_transform(y_tr.reshape(-1,1)).ravel()
+    y_val_s = y_scaler.transform(y_val.reshape(-1,1)).ravel()
     y_te_s = y_scaler.transform(y_te.reshape(-1,1)).ravel()
 
     tr_ds = StockDataset(X_tr_s, y_tr_s, SEQ_LEN)
+    val_ds = StockDataset(X_val_s, y_val_s, SEQ_LEN)
     te_ds = StockDataset(X_te_s, y_te_s, SEQ_LEN)
     tr_dl = DataLoader(tr_ds, batch_size=BATCH_SIZE, shuffle=True,  drop_last=True)
+    val_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
     te_dl = DataLoader(te_ds, batch_size=BATCH_SIZE, shuffle=False)
 
     # ── 模型 ──────────────────────────────────
@@ -408,13 +449,14 @@ def main():
 
     # ── 训练 ──────────────────────────────────
     best_val, patience_cnt = float("inf"), 0
-    tr_losses, va_losses = [], []
+    tr_losses, va_losses, te_losses = [], [], []
 
     for epoch in range(1, EPOCHS + 1):
         tr = train_epoch(model, tr_dl, optimizer, criterion, DEVICE, GRAD_ACCUM)
         scheduler.step()
-        va, _, _ = eval_epoch(model, te_dl, criterion, DEVICE)
-        tr_losses.append(tr); va_losses.append(va)
+        va, _, _ = eval_epoch(model, val_dl, criterion, DEVICE)
+        te, _, _ = eval_epoch(model, te_dl, criterion, DEVICE)
+        tr_losses.append(tr); va_losses.append(va); te_losses.append(te)
 
         if va < best_val:
             best_val = va
@@ -424,13 +466,57 @@ def main():
             patience_cnt += 1
 
         if epoch % 10 == 0 or epoch == 1:
-            print(f"Epoch {epoch:3d}/{EPOCHS} | train={tr:.6f} | val={va:.6f} | patience={patience_cnt}")
+            print(f"Epoch {epoch:3d}/{EPOCHS} | train={tr:.6f} | val={va:.6f} | test={te:.6f} | patience={patience_cnt}")
 
         if patience_cnt >= PATIENCE:
             print(f"Early stopping at epoch {epoch}.")
             break
 
-    # ── 测试集评估 ────────────────────────────
+    # ── 训练 BiLSTM 模型 ────────────────────────────
+    print("\n" + "="*60)
+    print("  开始训练 BiLSTM 模型进行对比")
+    print("="*60)
+    
+    bilstm_model = StockBiLSTM(
+        n_feat=len(FEATURE_COLS),
+        hidden_size=128,
+        num_layers=2,
+        dropout=DROPOUT
+    ).to(DEVICE)
+    print(f"BiLSTM Parameters: {sum(p.numel() for p in bilstm_model.parameters()):,}")
+    
+    bilstm_optimizer = torch.optim.AdamW(bilstm_model.parameters(), lr=LR, weight_decay=1e-4)
+    bilstm_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        bilstm_optimizer, max_lr=LR, 
+        steps_per_epoch=len(tr_dl), epochs=EPOCHS,
+        pct_start=0.1, anneal_strategy="cos"
+    )
+    
+    bilstm_tr_losses, bilstm_va_losses, bilstm_te_losses = [], [], []
+    bilstm_best_val, bilstm_patience_cnt = float("inf"), 0
+    
+    for epoch in range(1, EPOCHS + 1):
+        tr = train_epoch(bilstm_model, tr_dl, bilstm_optimizer, criterion, DEVICE, GRAD_ACCUM)
+        bilstm_scheduler.step()
+        va, _, _ = eval_epoch(bilstm_model, val_dl, criterion, DEVICE)
+        te, _, _ = eval_epoch(bilstm_model, te_dl, criterion, DEVICE)
+        bilstm_tr_losses.append(tr); bilstm_va_losses.append(va); bilstm_te_losses.append(te)
+        
+        if va < bilstm_best_val:
+            bilstm_best_val = va
+            bilstm_patience_cnt = 0
+            torch.save(bilstm_model.state_dict(), "best_bilstm_v3.pt")
+        else:
+            bilstm_patience_cnt += 1
+        
+        if epoch % 10 == 0 or epoch == 1:
+            print(f"BiLSTM Epoch {epoch:3d}/{EPOCHS} | train={tr:.6f} | val={va:.6f} | test={te:.6f} | patience={bilstm_patience_cnt}")
+        
+        if bilstm_patience_cnt >= PATIENCE:
+            print(f"BiLSTM Early stopping at epoch {epoch}.")
+            break
+    
+    # ── 测试集评估 Transformer ────────────────────────────
     model.load_state_dict(torch.load("best_stock_v3.pt", map_location=DEVICE))
     _, pred_s, true_s = eval_epoch(model, te_dl, criterion, DEVICE)
 
@@ -439,7 +525,7 @@ def main():
     true_ret = y_scaler.inverse_transform(true_s.reshape(-1,1)).ravel()
 
     # 还原为价格（从测试集起始价格累乘）
-    start_price = df_raw["Close"].iloc[split + SEQ_LEN]
+    start_price = df_raw["Close"].iloc[val_split + SEQ_LEN]
     pred_price  = start_price * np.cumprod(1 + pred_ret)
     true_price  = start_price * np.cumprod(1 + true_ret)
 
@@ -464,6 +550,8 @@ def main():
     max_dd = max_drawdown(strategy_ret)
 
     print(f"\n{'='*60}")
+    print(f"  Transformer 测试结果")
+    print(f"{'='*60}")
     print(f"  MAE        : {mae:.4f}")
     print(f"  RMSE       : {rmse:.4f}")
     print(f"  MAPE       : {mape:.2f}%")
@@ -472,64 +560,123 @@ def main():
     print(f"  Sharpe     : {sharpe:.3f}")
     print(f"  Max Drawdown: {max_dd:.2f}%")
     print(f"{'='*60}")
+    
+    # ── 测试集评估 BiLSTM ────────────────────────────
+    bilstm_model.load_state_dict(torch.load("best_bilstm_v3.pt", map_location=DEVICE))
+    _, bilstm_pred_s, bilstm_true_s = eval_epoch(bilstm_model, te_dl, criterion, DEVICE)
+    
+    bilstm_pred_ret = y_scaler.inverse_transform(bilstm_pred_s.reshape(-1,1)).ravel()
+    bilstm_pred_price = start_price * np.cumprod(1 + bilstm_pred_ret)
+    
+    bilstm_mae   = np.mean(np.abs(bilstm_pred_price - true_price))
+    bilstm_rmse  = np.sqrt(np.mean((bilstm_pred_price - true_price)**2))
+    bilstm_mape  = np.mean(np.abs((bilstm_pred_price - true_price) / (true_price + 1e-9))) * 100
+    bilstm_r2    = r2_score(true_price, bilstm_pred_price)
+    bilstm_dir_acc = np.mean(np.sign(bilstm_pred_ret) == np.sign(true_ret)) * 100
+    
+    bilstm_strategy_ret = np.where(bilstm_pred_ret > 0, true_ret, -true_ret)
+    bilstm_sharpe = (bilstm_strategy_ret.mean() / (bilstm_strategy_ret.std() + 1e-9)) * np.sqrt(252)
+    bilstm_max_dd = max_drawdown(bilstm_strategy_ret)
+    
+    print(f"\n{'='*60}")
+    print(f"  BiLSTM 测试结果")
+    print(f"{'='*60}")
+    print(f"  MAE        : {bilstm_mae:.4f}")
+    print(f"  RMSE       : {bilstm_rmse:.4f}")
+    print(f"  MAPE       : {bilstm_mape:.2f}%")
+    print(f"  R²         : {bilstm_r2:.4f}")
+    print(f"  Direction  : {bilstm_dir_acc:.1f}%")
+    print(f"  Sharpe     : {bilstm_sharpe:.3f}")
+    print(f"  Max Drawdown: {bilstm_max_dd:.2f}%")
+    print(f"{'='*60}")
 
     # ── 可视化 ────────────────────────────────
-    fig = plt.figure(figsize=(16, 12))
-    gs  = gridspec.GridSpec(3, 2, figure=fig)
+    fig = plt.figure(figsize=(20, 14))
+    gs  = gridspec.GridSpec(4, 2, figure=fig)
 
-    # 1) 训练曲线
+    # 1) Transformer 训练曲线（包含测试损失）
     ax0 = fig.add_subplot(gs[0, 0])
-    ax0.plot(tr_losses, label="Train", alpha=0.8)
-    ax0.plot(va_losses, label="Val",   alpha=0.8)
-    ax0.set_title("Loss Curve (Huber)"); ax0.legend(); ax0.set_xlabel("Epoch")
+    ax0.plot(tr_losses, label="Train", alpha=0.8, color="steelblue")
+    ax0.plot(va_losses, label="Val",   alpha=0.8, color="orange")
+    ax0.plot(te_losses, label="Test",  alpha=0.8, color="green", linestyle="--")
+    ax0.set_title("Transformer Loss Curve (Train/Val/Test)"); ax0.legend(); ax0.set_xlabel("Epoch")
 
-    # 2) 价格对比
+    # 2) BiLSTM 训练曲线（包含测试损失）
     ax1 = fig.add_subplot(gs[0, 1])
-    ax1.plot(true_price, label="Actual",    alpha=0.85)
-    ax1.plot(pred_price, label="Predicted", alpha=0.85, linestyle="--")
-    ax1.set_title(f"{TICKER} Reconstructed Price (Test Set)")
-    ax1.legend(); ax1.set_xlabel("Day")
+    ax1.plot(bilstm_tr_losses, label="Train", alpha=0.8, color="steelblue")
+    ax1.plot(bilstm_va_losses, label="Val",   alpha=0.8, color="orange")
+    ax1.plot(bilstm_te_losses, label="Test",  alpha=0.8, color="green", linestyle="--")
+    ax1.set_title("BiLSTM Loss Curve (Train/Val/Test)"); ax1.legend(); ax1.set_xlabel("Epoch")
 
-    # 3) 收益率散点
+    # 3) 模型对比：验证损失
     ax2 = fig.add_subplot(gs[1, 0])
-    ax2.scatter(true_ret, pred_ret, alpha=0.3, s=8, color="steelblue")
-    lim = max(abs(true_ret).max(), abs(pred_ret).max()) * 1.1
-    ax2.plot([-lim, lim], [-lim, lim], "r--", lw=1)
-    ax2.set_xlim(-lim, lim); ax2.set_ylim(-lim, lim)
-    ax2.set_title(f"Return: True vs Predicted  (R²={r2:.3f})  Dir={dir_acc:.1f}%")
-    ax2.set_xlabel("True Return"); ax2.set_ylabel("Pred Return")
+    epochs_range = range(1, len(va_losses) + 1)
+    bilstm_epochs_range = range(1, len(bilstm_va_losses) + 1)
+    ax2.plot(epochs_range, va_losses, label="Transformer Val", alpha=0.8, color="#1F77B4", linewidth=2)
+    ax2.plot(epochs_range, te_losses, label="Transformer Test", alpha=0.8, color="#72A8D8", linewidth=2, linestyle="--")
+    ax2.plot(bilstm_epochs_range, bilstm_va_losses, label="BiLSTM Val", alpha=0.8, color="#FF7F0E", linewidth=2)
+    ax2.plot(bilstm_epochs_range, bilstm_te_losses, label="BiLSTM Test", alpha=0.8, color="#FFBC70", linewidth=2, linestyle="--")
+    ax2.set_title("Model Comparison: Validation & Test Loss"); ax2.legend(); ax2.set_xlabel("Epoch")
+    ax2.grid(True, alpha=0.3)
 
-    # 4) 误差分布
+    # 4) 模型对比：价格预测
     ax3 = fig.add_subplot(gs[1, 1])
-    errors = pred_price - true_price
-    ax3.hist(errors, bins=40, color="coral", edgecolor="white", alpha=0.8)
-    ax3.axvline(0, color="black", lw=1.5, linestyle="--")
-    ax3.set_title("Prediction Error Distribution")
-    ax3.set_xlabel("Error (Price)")
+    ax3.plot(true_price, label="Actual", alpha=0.85, color="black", linewidth=1.5)
+    ax3.plot(pred_price, label=f"Transformer (R²={r2:.3f})", alpha=0.8, color="#1F77B4", linestyle="--")
+    ax3.plot(bilstm_pred_price, label=f"BiLSTM (R²={bilstm_r2:.3f})", alpha=0.8, color="#FF7F0E", linestyle="--")
+    ax3.set_title(f"{TICKER} Price Prediction Comparison")
+    ax3.legend(); ax3.set_xlabel("Day")
 
-    # 5) 策略收益
+    # 5) 收益率散点 - Transformer
     ax4 = fig.add_subplot(gs[2, 0])
-    strategy_cum = np.cumprod(1 + strategy_ret)
-    buy_hold_cum = np.cumprod(1 + true_ret)
-    ax4.plot(strategy_cum, label="Strategy", alpha=0.85)
-    ax4.plot(buy_hold_cum, label="Buy & Hold", alpha=0.85, linestyle="--")
-    ax4.set_title(f"Strategy vs Buy & Hold (Sharpe: {sharpe:.3f})")
-    ax4.legend(); ax4.set_xlabel("Day")
-    ax4.set_ylabel("Cumulative Return")
+    ax4.scatter(true_ret, pred_ret, alpha=0.3, s=8, color="#1F77B4")
+    lim = max(abs(true_ret).max(), abs(pred_ret).max()) * 1.1
+    ax4.plot([-lim, lim], [-lim, lim], "r--", lw=1)
+    ax4.set_xlim(-lim, lim); ax4.set_ylim(-lim, lim)
+    ax4.set_title(f"Transformer: Return True vs Pred (R²={r2:.3f}, Dir={dir_acc:.1f}%)")
+    ax4.set_xlabel("True Return"); ax4.set_ylabel("Pred Return")
 
-    # 6) 最大回撤
+    # 6) 收益率散点 - BiLSTM
     ax5 = fig.add_subplot(gs[2, 1])
-    strategy_cum = np.cumprod(1 + strategy_ret)
-    peak = np.maximum.accumulate(strategy_cum)
-    drawdown = (strategy_cum - peak) / peak * 100
-    ax5.plot(drawdown, color="crimson", alpha=0.85)
-    ax5.set_title(f"Strategy Drawdown (Max: {max_dd:.2f}%)")
-    ax5.set_xlabel("Day")
-    ax5.set_ylabel("Drawdown (%)")
+    ax5.scatter(true_ret, bilstm_pred_ret, alpha=0.3, s=8, color="#FF7F0E")
+    ax5.plot([-lim, lim], [-lim, lim], "r--", lw=1)
+    ax5.set_xlim(-lim, lim); ax5.set_ylim(-lim, lim)
+    ax5.set_title(f"BiLSTM: Return True vs Pred (R²={bilstm_r2:.3f}, Dir={bilstm_dir_acc:.1f}%)")
+    ax5.set_xlabel("True Return"); ax5.set_ylabel("Pred Return")
 
-    plt.suptitle(f"Stock Transformer v3 — {TICKER}", fontsize=14, fontweight="bold")
+    # 7) 策略收益对比
+    ax6 = fig.add_subplot(gs[3, 0])
+    strategy_cum = np.cumprod(1 + strategy_ret)
+    bilstm_strategy_cum = np.cumprod(1 + bilstm_strategy_ret)
+    buy_hold_cum = np.cumprod(1 + true_ret)
+    ax6.plot(strategy_cum, label=f"Transformer Strategy (Sharpe: {sharpe:.3f})", alpha=0.85, color="#1F77B4")
+    ax6.plot(bilstm_strategy_cum, label=f"BiLSTM Strategy (Sharpe: {bilstm_sharpe:.3f})", alpha=0.85, color="#FF7F0E")
+    ax6.plot(buy_hold_cum, label="Buy & Hold", alpha=0.85, color="gray", linestyle="--")
+    ax6.set_title("Strategy Performance Comparison")
+    ax6.legend(); ax6.set_xlabel("Day")
+    ax6.set_ylabel("Cumulative Return")
+
+    # 8) 指标对比柱状图
+    ax7 = fig.add_subplot(gs[3, 1])
+    metrics = ['MAE', 'RMSE', 'MAPE', 'R²', 'Dir Acc']
+    transformer_values = [mae, rmse, mape, r2*100, dir_acc]  # R² 放大100倍便于显示
+    bilstm_values = [bilstm_mae, bilstm_rmse, bilstm_mape, bilstm_r2*100, bilstm_dir_acc]
+    
+    x = np.arange(len(metrics))
+    width = 0.35
+    bars1 = ax7.bar(x - width/2, transformer_values, width, label='Transformer', color='#1F77B4', alpha=0.8)
+    bars2 = ax7.bar(x + width/2, bilstm_values, width, label='BiLSTM', color='#FF7F0E', alpha=0.8)
+    
+    ax7.set_ylabel('Value')
+    ax7.set_title('Metrics Comparison')
+    ax7.set_xticks(x)
+    ax7.set_xticklabels(metrics)
+    ax7.legend()
+    ax7.grid(True, alpha=0.3, axis='y')
+
+    plt.suptitle(f"Stock Prediction: BiLSTM vs Transformer — {TICKER}", fontsize=16, fontweight="bold")
     plt.tight_layout()
-    plt.savefig("stock_transformer_v3_result.png", dpi=150)
+    plt.savefig("stock_transformer_v3_result.png", dpi=150, bbox_inches='tight')
     print("Figure saved → stock_transformer_v3_result.png")
     plt.show()
 
