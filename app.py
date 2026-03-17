@@ -543,7 +543,7 @@ with main_container:
                 st.subheader("📈 预测效果对比")
                 
                 # 创建多图表布局
-                chart_tabs = st.tabs(["📊 价格预测对比", "📉 残差分析", "📈 收益率对比", "🎯 误差分布", "📋 综合指标雷达图"])
+                chart_tabs = st.tabs(["📊 价格预测对比", "📉 残差分析", "📈 收益率对比", "🎯 误差分布"])
                 
                 with chart_tabs[0]:
                     # 价格预测对比图
@@ -866,80 +866,26 @@ with main_container:
                         height=400
                     )
                     st.plotly_chart(fig_box, use_container_width=True)
-                
-                with chart_tabs[4]:
-                    # 综合指标雷达图
-                    categories = ['R²', '方向准确率', '1/MAPE', '1/RMSE', '稳定性']
-                    
-                    # 归一化指标到0-1范围
-                    bilstm_radar = [
-                        max(0, bilstm_metrics['R²']),
-                        bilstm_metrics['Direction_Accuracy'] / 100,
-                        1 / (1 + bilstm_metrics['MAPE']),
-                        1 / (1 + bilstm_metrics['RMSE']),
-                        1 - abs(np.mean(bilstm_error)) / (np.std(bilstm_error) + 1e-6)  # 稳定性指标
-                    ]
-                    
-                    trans_radar = [
-                        max(0, trans_metrics['R²']),
-                        trans_metrics['Direction_Accuracy'] / 100,
-                        1 / (1 + trans_metrics['MAPE']),
-                        1 / (1 + trans_metrics['RMSE']),
-                        1 - abs(np.mean(trans_error)) / (np.std(trans_error) + 1e-6)
-                    ]
-                    
-                    fig_radar = go.Figure()
-                    
-                    fig_radar.add_trace(go.Scatterpolar(
-                        r=bilstm_radar + [bilstm_radar[0]],
-                        theta=categories + [categories[0]],
-                        fill='toself',
-                        name=f'BiLSTM {bilstm_version}',
-                        line_color='#FF7F0E',
-                        fillcolor='rgba(255, 127, 14, 0.3)'
-                    ))
-                    
-                    fig_radar.add_trace(go.Scatterpolar(
-                        r=trans_radar + [trans_radar[0]],
-                        theta=categories + [categories[0]],
-                        fill='toself',
-                        name=f'Transformer {transformer_version}',
-                        line_color='#1F77B4',
-                        fillcolor='rgba(31, 119, 180, 0.3)'
-                    ))
-                    
-                    fig_radar.update_layout(
-                        polar=dict(
-                            radialaxis=dict(
-                                visible=True,
-                                range=[0, 1]
-                            )),
-                        showlegend=True,
-                        title='模型综合能力雷达图',
-                        template='plotly_dark',
-                        height=500
-                    )
-                    st.plotly_chart(fig_radar, use_container_width=True)
                     
                     # 指标对比表格
                     st.markdown("**📊 详细指标对比**")
                     comparison_df = pd.DataFrame({
                         '指标': ['MAE', 'RMSE', 'MAPE (%)', 'R²', '方向准确率 (%)', '误差均值', '误差标准差'],
                         'BiLSTM': [
-                            f"{bilstm_metrics['MAE']:.4f}",
-                            f"{bilstm_metrics['RMSE']:.4f}",
-                            f"{bilstm_metrics['MAPE']:.2f}",
-                            f"{bilstm_metrics['R²']:.4f}",
-                            f"{bilstm_metrics['Direction_Accuracy']:.2f}",
+                            f"{bilstm_metrics.get('MAE', 0):.4f}",
+                            f"{bilstm_metrics.get('RMSE', 0):.4f}",
+                            f"{bilstm_metrics.get('MAPE', 0):.2f}",
+                            f"{bilstm_metrics.get('R²', 0):.4f}",
+                            f"{bilstm_metrics.get('Direction_Accuracy', 0):.2f}",
                             f"{np.mean(bilstm_error):.4f}",
                             f"{np.std(bilstm_error):.4f}"
                         ],
                         'Transformer': [
-                            f"{trans_metrics['MAE']:.4f}",
-                            f"{trans_metrics['RMSE']:.4f}",
-                            f"{trans_metrics['MAPE']:.2f}",
-                            f"{trans_metrics['R²']:.4f}",
-                            f"{trans_metrics['Direction_Accuracy']:.2f}",
+                            f"{trans_metrics.get('MAE', 0):.4f}",
+                            f"{trans_metrics.get('RMSE', 0):.4f}",
+                            f"{trans_metrics.get('MAPE', 0):.2f}",
+                            f"{trans_metrics.get('R²', 0):.4f}",
+                            f"{trans_metrics.get('Direction_Accuracy', 0):.2f}",
                             f"{np.mean(trans_error):.4f}",
                             f"{np.std(trans_error):.4f}"
                         ]
@@ -950,8 +896,8 @@ with main_container:
                 st.header("🏆 模型推荐")
                 
                 # 比较方向准确率
-                bilstm_dir_acc = bilstm_metrics['Direction_Accuracy']
-                trans_dir_acc = trans_metrics['Direction_Accuracy']
+                bilstm_dir_acc = bilstm_metrics.get('Direction_Accuracy', 0)
+                trans_dir_acc = trans_metrics.get('Direction_Accuracy', 0)
                 
                 if bilstm_dir_acc > trans_dir_acc:
                     st.success(f"🧠 **BiLSTM 模型**表现更好！")
