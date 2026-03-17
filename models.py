@@ -347,27 +347,25 @@ class StockPredictor:
         
         return X_train, y_train, X_test, y_test, available_cols
     
-    def train_model(self, model_name, model, X_train, y_train, X_val, y_val, epochs=50, batch_size=32, lr=0.001, early_stopping_patience=10, verbose=True, progress_callback=None):
-        """训练模型（优化版）"""
+    def train_model(self, model_name, model, X_train, y_train, X_val, y_val, X_test=None, y_test=None, epochs=50, batch_size=32, lr=0.001, early_stopping_patience=10, verbose=True, progress_callback=None):
+        """训练模型（优化版）- 支持测试损失记录"""
         train_dataset = TensorDataset(X_train, y_train)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         
         criterion = nn.MSELoss()
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
         
-        # 使用更高效的学习率调度器
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr * 0.01)
         
-        # 早停设置
         best_val_loss = float('inf')
         patience_counter = 0
         best_model_state = None
         
-        history = {'train_loss': [], 'val_loss': [], 'lr': []}
+        history = {'train_loss': [], 'val_loss': [], 'test_loss': [], 'lr': []}
+        has_test_data = X_test is not None and y_test is not None
         
         model.train()
         for epoch in range(epochs):
-            # 训练阶段
             train_losses = []
             for batch_X, batch_y in train_loader:
                 optimizer.zero_grad()
@@ -375,37 +373,37 @@ class StockPredictor:
                 loss = criterion(outputs.squeeze(), batch_y)
                 loss.backward()
                 
-                # 梯度裁剪 - 防止梯度爆炸
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 
                 optimizer.step()
                 train_losses.append(loss.item())
             
-            # 验证阶段
             model.eval()
             with torch.no_grad():
                 val_outputs = model(X_val)
                 val_loss = criterion(val_outputs.squeeze(), y_val).item()
+                
+                test_loss = None
+                if has_test_data:
+                    test_outputs = model(X_test)
+                    test_loss = criterion(test_outputs.squeeze(), y_test).item()
             
             avg_train_loss = np.mean(train_losses)
             current_lr = optimizer.param_groups[0]['lr']
             
             history['train_loss'].append(avg_train_loss)
             history['val_loss'].append(val_loss)
+            history['test_loss'].append(test_loss if test_loss is not None else 0.0)
             history['lr'].append(current_lr)
             
-            # 更新学习率
             scheduler.step()
             
-            # 回调函数（用于Streamlit进度更新）
             if progress_callback is not None:
                 progress_callback(epoch + 1, epochs, avg_train_loss, val_loss, model_name)
             
-            # 早停检查
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 patience_counter = 0
-                # 保存最佳模型
                 best_model_state = model.state_dict().copy()
             else:
                 patience_counter += 1
@@ -415,18 +413,16 @@ class StockPredictor:
                 if patience_counter >= early_stopping_patience:
                     if verbose:
                         print(f"  {model_name}: 早停于第 {epoch + 1} 轮")
-                    # 恢复最佳模型
                     if best_model_state is not None:
                         model.load_state_dict(best_model_state)
                     break
             
-            # 显示进度
             if verbose and (epoch + 1) % 5 == 0:
-                print(f"  {model_name} Epoch [{epoch+1}/{epochs}] - Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}, LR: {current_lr:.6f}")
+                test_info = f", Test Loss: {test_loss:.6f}" if test_loss is not None else ""
+                print(f"  {model_name} Epoch [{epoch+1}/{epochs}] - Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}{test_info}, LR: {current_lr:.6f}")
             
             model.train()
         
-        # 确保使用最佳模型
         if best_model_state is not None:
             model.load_state_dict(best_model_state)
         
