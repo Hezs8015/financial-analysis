@@ -449,6 +449,9 @@ class StockPredictor:
         mae = mean_absolute_error(actuals, predictions)
         r2 = r2_score(actuals, predictions)
         
+        # 计算 MAPE (平均绝对百分比误差)
+        mape = np.mean(np.abs((actuals - predictions) / (actuals + 1e-9))) * 100
+        
         # 计算方向准确率
         pred_direction = np.diff(predictions) > 0
         actual_direction = np.diff(actuals) > 0
@@ -458,6 +461,7 @@ class StockPredictor:
             'MSE': mse,
             'RMSE': rmse,
             'MAE': mae,
+            'MAPE': mape,
             'R²': r2,
             'Direction_Accuracy': direction_accuracy
         }
