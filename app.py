@@ -541,40 +541,410 @@ with main_container:
                 
                 # 绘制预测对比图
                 st.subheader("📈 预测效果对比")
-                fig = go.Figure()
                 
-                # 实际值
-                fig.add_trace(go.Scatter(
-                    x=df['Date'].iloc[-len(actuals):],
-                    y=actuals,
-                    name='实际值',
-                    line=dict(color='white', width=2)
-                ))
+                # 创建多图表布局
+                chart_tabs = st.tabs(["📊 价格预测对比", "📉 残差分析", "📈 收益率对比", "🎯 误差分布", "📋 综合指标雷达图"])
                 
-                # BiLSTM预测值
-                fig.add_trace(go.Scatter(
-                    x=df['Date'].iloc[-len(bilstm_preds):],
-                    y=bilstm_preds,
-                    name=f'BiLSTM {bilstm_version} 预测',
-                    line=dict(color='green', width=2, dash='dash')
-                ))
+                with chart_tabs[0]:
+                    # 价格预测对比图
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(actuals):],
+                        y=actuals,
+                        name='实际值',
+                        line=dict(color='white', width=2)
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(bilstm_preds):],
+                        y=bilstm_preds,
+                        name=f'BiLSTM {bilstm_version} 预测',
+                        line=dict(color='#FF7F0E', width=2, dash='dash')
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(trans_preds):],
+                        y=trans_preds,
+                        name=f'Transformer {transformer_version} 预测',
+                        line=dict(color='#1F77B4', width=2, dash='dot')
+                    ))
+                    
+                    fig.update_layout(
+                        xaxis_title='日期',
+                        yaxis_title='价格',
+                        title='实际值 vs 预测值',
+                        template='plotly_dark',
+                        height=500
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # 预测误差曲线
+                    fig_error = go.Figure()
+                    bilstm_error = np.array(bilstm_preds) - np.array(actuals)
+                    trans_error = np.array(trans_preds) - np.array(actuals)
+                    
+                    fig_error.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(actuals):],
+                        y=bilstm_error,
+                        name='BiLSTM 误差',
+                        line=dict(color='#FF7F0E', width=1.5),
+                        fill='tozeroy',
+                        fillcolor='rgba(255, 127, 14, 0.2)'
+                    ))
+                    
+                    fig_error.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(actuals):],
+                        y=trans_error,
+                        name='Transformer 误差',
+                        line=dict(color='#1F77B4', width=1.5),
+                        fill='tozeroy',
+                        fillcolor='rgba(31, 119, 180, 0.2)'
+                    ))
+                    
+                    fig_error.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
+                    
+                    fig_error.update_layout(
+                        xaxis_title='日期',
+                        yaxis_title='预测误差',
+                        title='预测误差随时间变化',
+                        template='plotly_dark',
+                        height=350
+                    )
+                    st.plotly_chart(fig_error, use_container_width=True)
                 
-                # Transformer预测值
-                fig.add_trace(go.Scatter(
-                    x=df['Date'].iloc[-len(trans_preds):],
-                    y=trans_preds,
-                    name=f'Transformer {transformer_version} 预测',
-                    line=dict(color='blue', width=2, dash='dot')
-                ))
+                with chart_tabs[1]:
+                    # 残差分析
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**BiLSTM 残差分析**")
+                        fig_resid1 = go.Figure()
+                        fig_resid1.add_trace(go.Scatter(
+                            x=actuals, y=bilstm_error,
+                            mode='markers',
+                            marker=dict(color='#FF7F0E', size=6, opacity=0.6),
+                            name='残差'
+                        ))
+                        fig_resid1.add_hline(y=0, line_dash="dash", line_color="white")
+                        fig_resid1.update_layout(
+                            xaxis_title='实际值',
+                            yaxis_title='残差',
+                            template='plotly_dark',
+                            height=350
+                        )
+                        st.plotly_chart(fig_resid1, use_container_width=True)
+                    
+                    with col2:
+                        st.markdown("**Transformer 残差分析**")
+                        fig_resid2 = go.Figure()
+                        fig_resid2.add_trace(go.Scatter(
+                            x=actuals, y=trans_error,
+                            mode='markers',
+                            marker=dict(color='#1F77B4', size=6, opacity=0.6),
+                            name='残差'
+                        ))
+                        fig_resid2.add_hline(y=0, line_dash="dash", line_color="white")
+                        fig_resid2.update_layout(
+                            xaxis_title='实际值',
+                            yaxis_title='残差',
+                            template='plotly_dark',
+                            height=350
+                        )
+                        st.plotly_chart(fig_resid2, use_container_width=True)
+                    
+                    # Q-Q图
+                    from scipy import stats
+                    col3, col4 = st.columns(2)
+                    
+                    with col3:
+                        st.markdown("**BiLSTM Q-Q 图**")
+                        qq_data1 = stats.probplot(bilstm_error, dist="norm")
+                        fig_qq1 = go.Figure()
+                        fig_qq1.add_trace(go.Scatter(
+                            x=qq_data1[0][0], y=qq_data1[0][1],
+                            mode='markers',
+                            marker=dict(color='#FF7F0E', size=6),
+                            name='Q-Q'
+                        ))
+                        fig_qq1.add_trace(go.Scatter(
+                            x=qq_data1[0][0], y=qq_data1[1][0] * qq_data1[0][0] + qq_data1[1][1],
+                            mode='lines',
+                            line=dict(color='white', dash='dash'),
+                            name='理想线'
+                        ))
+                        fig_qq1.update_layout(
+                            xaxis_title='理论分位数',
+                            yaxis_title='样本分位数',
+                            template='plotly_dark',
+                            height=350
+                        )
+                        st.plotly_chart(fig_qq1, use_container_width=True)
+                    
+                    with col4:
+                        st.markdown("**Transformer Q-Q 图**")
+                        qq_data2 = stats.probplot(trans_error, dist="norm")
+                        fig_qq2 = go.Figure()
+                        fig_qq2.add_trace(go.Scatter(
+                            x=qq_data2[0][0], y=qq_data2[0][1],
+                            mode='markers',
+                            marker=dict(color='#1F77B4', size=6),
+                            name='Q-Q'
+                        ))
+                        fig_qq2.add_trace(go.Scatter(
+                            x=qq_data2[0][0], y=qq_data2[1][0] * qq_data2[0][0] + qq_data2[1][1],
+                            mode='lines',
+                            line=dict(color='white', dash='dash'),
+                            name='理想线'
+                        ))
+                        fig_qq2.update_layout(
+                            xaxis_title='理论分位数',
+                            yaxis_title='样本分位数',
+                            template='plotly_dark',
+                            height=350
+                        )
+                        st.plotly_chart(fig_qq2, use_container_width=True)
                 
-                fig.update_layout(
-                    xaxis_title='日期',
-                    yaxis_title='价格',
-                    title='实际值 vs 预测值',
-                    template='plotly_dark',
-                    height=500
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                with chart_tabs[2]:
+                    # 收益率对比
+                    actual_returns = np.diff(actuals) / actuals[:-1] * 100
+                    bilstm_returns = np.diff(bilstm_preds) / bilstm_preds[:-1] * 100
+                    trans_returns = np.diff(trans_preds) / trans_preds[:-1] * 100
+                    
+                    fig_ret = go.Figure()
+                    
+                    fig_ret.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(actuals)+1:],
+                        y=actual_returns,
+                        name='实际收益率',
+                        line=dict(color='white', width=1.5)
+                    ))
+                    
+                    fig_ret.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(bilstm_preds)+1:],
+                        y=bilstm_returns,
+                        name='BiLSTM 预测收益率',
+                        line=dict(color='#FF7F0E', width=1.5, dash='dash')
+                    ))
+                    
+                    fig_ret.add_trace(go.Scatter(
+                        x=df['Date'].iloc[-len(trans_preds)+1:],
+                        y=trans_returns,
+                        name='Transformer 预测收益率',
+                        line=dict(color='#1F77B4', width=1.5, dash='dot')
+                    ))
+                    
+                    fig_ret.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+                    
+                    fig_ret.update_layout(
+                        xaxis_title='日期',
+                        yaxis_title='收益率 (%)',
+                        title='收益率对比',
+                        template='plotly_dark',
+                        height=400
+                    )
+                    st.plotly_chart(fig_ret, use_container_width=True)
+                    
+                    # 收益率散点图
+                    col5, col6 = st.columns(2)
+                    
+                    with col5:
+                        st.markdown("**BiLSTM 收益率相关性**")
+                        fig_scatter1 = go.Figure()
+                        fig_scatter1.add_trace(go.Scatter(
+                            x=actual_returns, y=bilstm_returns,
+                            mode='markers',
+                            marker=dict(color='#FF7F0E', size=6, opacity=0.6),
+                        ))
+                        # 添加对角线
+                        min_val = min(actual_returns.min(), bilstm_returns.min())
+                        max_val = max(actual_returns.max(), bilstm_returns.max())
+                        fig_scatter1.add_trace(go.Scatter(
+                            x=[min_val, max_val], y=[min_val, max_val],
+                            mode='lines',
+                            line=dict(color='white', dash='dash'),
+                            name='理想线'
+                        ))
+                        fig_scatter1.update_layout(
+                            xaxis_title='实际收益率 (%)',
+                            yaxis_title='预测收益率 (%)',
+                            template='plotly_dark',
+                            height=350
+                        )
+                        st.plotly_chart(fig_scatter1, use_container_width=True)
+                    
+                    with col6:
+                        st.markdown("**Transformer 收益率相关性**")
+                        fig_scatter2 = go.Figure()
+                        fig_scatter2.add_trace(go.Scatter(
+                            x=actual_returns, y=trans_returns,
+                            mode='markers',
+                            marker=dict(color='#1F77B4', size=6, opacity=0.6),
+                        ))
+                        fig_scatter2.add_trace(go.Scatter(
+                            x=[min_val, max_val], y=[min_val, max_val],
+                            mode='lines',
+                            line=dict(color='white', dash='dash'),
+                            name='理想线'
+                        ))
+                        fig_scatter2.update_layout(
+                            xaxis_title='实际收益率 (%)',
+                            yaxis_title='预测收益率 (%)',
+                            template='plotly_dark',
+                            height=350
+                        )
+                        st.plotly_chart(fig_scatter2, use_container_width=True)
+                
+                with chart_tabs[3]:
+                    # 误差分布
+                    col7, col8 = st.columns(2)
+                    
+                    with col7:
+                        st.markdown("**BiLSTM 误差分布**")
+                        fig_hist1 = go.Figure()
+                        fig_hist1.add_trace(go.Histogram(
+                            x=bilstm_error,
+                            nbinsx=30,
+                            marker_color='#FF7F0E',
+                            opacity=0.7,
+                            name='误差分布'
+                        ))
+                        fig_hist1.add_vline(x=0, line_dash="dash", line_color="white")
+                        fig_hist1.add_vline(x=np.mean(bilstm_error), line_dash="dash", line_color="red", 
+                                           annotation_text=f"均值: {np.mean(bilstm_error):.4f}")
+                        fig_hist1.update_layout(
+                            xaxis_title='预测误差',
+                            yaxis_title='频数',
+                            template='plotly_dark',
+                            height=350,
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig_hist1, use_container_width=True)
+                        st.caption(f"标准差: {np.std(bilstm_error):.4f}")
+                    
+                    with col8:
+                        st.markdown("**Transformer 误差分布**")
+                        fig_hist2 = go.Figure()
+                        fig_hist2.add_trace(go.Histogram(
+                            x=trans_error,
+                            nbinsx=30,
+                            marker_color='#1F77B4',
+                            opacity=0.7,
+                            name='误差分布'
+                        ))
+                        fig_hist2.add_vline(x=0, line_dash="dash", line_color="white")
+                        fig_hist2.add_vline(x=np.mean(trans_error), line_dash="dash", line_color="red",
+                                           annotation_text=f"均值: {np.mean(trans_error):.4f}")
+                        fig_hist2.update_layout(
+                            xaxis_title='预测误差',
+                            yaxis_title='频数',
+                            template='plotly_dark',
+                            height=350,
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig_hist2, use_container_width=True)
+                        st.caption(f"标准差: {np.std(trans_error):.4f}")
+                    
+                    # 误差箱线图对比
+                    fig_box = go.Figure()
+                    fig_box.add_trace(go.Box(
+                        y=bilstm_error,
+                        name='BiLSTM',
+                        marker_color='#FF7F0E',
+                        boxmean=True
+                    ))
+                    fig_box.add_trace(go.Box(
+                        y=trans_error,
+                        name='Transformer',
+                        marker_color='#1F77B4',
+                        boxmean=True
+                    ))
+                    fig_box.update_layout(
+                        yaxis_title='预测误差',
+                        title='误差分布箱线图对比',
+                        template='plotly_dark',
+                        height=400
+                    )
+                    st.plotly_chart(fig_box, use_container_width=True)
+                
+                with chart_tabs[4]:
+                    # 综合指标雷达图
+                    categories = ['R²', '方向准确率', '1/MAPE', '1/RMSE', '稳定性']
+                    
+                    # 归一化指标到0-1范围
+                    bilstm_radar = [
+                        max(0, bilstm_metrics['R²']),
+                        bilstm_metrics['Direction_Accuracy'] / 100,
+                        1 / (1 + bilstm_metrics['MAPE']),
+                        1 / (1 + bilstm_metrics['RMSE']),
+                        1 - abs(np.mean(bilstm_error)) / (np.std(bilstm_error) + 1e-6)  # 稳定性指标
+                    ]
+                    
+                    trans_radar = [
+                        max(0, trans_metrics['R²']),
+                        trans_metrics['Direction_Accuracy'] / 100,
+                        1 / (1 + trans_metrics['MAPE']),
+                        1 / (1 + trans_metrics['RMSE']),
+                        1 - abs(np.mean(trans_error)) / (np.std(trans_error) + 1e-6)
+                    ]
+                    
+                    fig_radar = go.Figure()
+                    
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=bilstm_radar + [bilstm_radar[0]],
+                        theta=categories + [categories[0]],
+                        fill='toself',
+                        name=f'BiLSTM {bilstm_version}',
+                        line_color='#FF7F0E',
+                        fillcolor='rgba(255, 127, 14, 0.3)'
+                    ))
+                    
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=trans_radar + [trans_radar[0]],
+                        theta=categories + [categories[0]],
+                        fill='toself',
+                        name=f'Transformer {transformer_version}',
+                        line_color='#1F77B4',
+                        fillcolor='rgba(31, 119, 180, 0.3)'
+                    ))
+                    
+                    fig_radar.update_layout(
+                        polar=dict(
+                            radialaxis=dict(
+                                visible=True,
+                                range=[0, 1]
+                            )),
+                        showlegend=True,
+                        title='模型综合能力雷达图',
+                        template='plotly_dark',
+                        height=500
+                    )
+                    st.plotly_chart(fig_radar, use_container_width=True)
+                    
+                    # 指标对比表格
+                    st.markdown("**📊 详细指标对比**")
+                    comparison_df = pd.DataFrame({
+                        '指标': ['MAE', 'RMSE', 'MAPE (%)', 'R²', '方向准确率 (%)', '误差均值', '误差标准差'],
+                        'BiLSTM': [
+                            f"{bilstm_metrics['MAE']:.4f}",
+                            f"{bilstm_metrics['RMSE']:.4f}",
+                            f"{bilstm_metrics['MAPE']:.2f}",
+                            f"{bilstm_metrics['R²']:.4f}",
+                            f"{bilstm_metrics['Direction_Accuracy']:.2f}",
+                            f"{np.mean(bilstm_error):.4f}",
+                            f"{np.std(bilstm_error):.4f}"
+                        ],
+                        'Transformer': [
+                            f"{trans_metrics['MAE']:.4f}",
+                            f"{trans_metrics['RMSE']:.4f}",
+                            f"{trans_metrics['MAPE']:.2f}",
+                            f"{trans_metrics['R²']:.4f}",
+                            f"{trans_metrics['Direction_Accuracy']:.2f}",
+                            f"{np.mean(trans_error):.4f}",
+                            f"{np.std(trans_error):.4f}"
+                        ]
+                    })
+                    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
                 
                 # 模型推荐
                 st.header("🏆 模型推荐")
