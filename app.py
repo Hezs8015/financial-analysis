@@ -536,7 +536,7 @@ with main_container:
                 
                 try:
                     # 延迟导入 TimeSeriesPredictor
-                    from models import TimeSeriesPredictor
+                    from ts_models import TimeSeriesPredictor
                     
                     if use_arma:
                         status_text.text("训练 ARMA 模型...")
