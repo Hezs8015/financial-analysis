@@ -8,16 +8,12 @@ import plotly.express as px
 from models import (
     BiLSTMModelV1, BiLSTMModelV2, BiLSTMModelV3,
     TransformerModelV1, TransformerModelV2,
-    StockPredictor
+    StockPredictor, TimeSeriesPredictor
 )
 import io
-from statsmodels.tsa.arima.model import ARIMA
-from arch import arch_model
-from sklearn.metrics import accuracy_score
-import matplotlib.pyplot as plt
 
 st.set_page_config(
-    page_title="股市预测模型对比 - BiLSTM vs Transformer",
+    page_title="股市预测模型对比 - BiLSTM vs Transformer vs ARMA vs GARCH",
     page_icon="📈",
     layout="wide"
 )
@@ -196,6 +192,27 @@ if st.sidebar.checkbox("ℹ️ Transformer版本说明"):
     **Transformer版本对比：**
     - **v1 (基础版)**: 1层编码器，64模型维度，4注意力头
     - **v2 (增强版)**: 2层编码器，128模型维度，8注意力头
+    """)
+
+# ARMA/GARCH 模型选择
+use_arma = st.sidebar.checkbox("启用 ARMA 模型", value=True)
+arma_order_p = st.sidebar.slider("ARMA - AR 阶数", min_value=1, max_value=5, value=1) if use_arma else 1
+arma_order_q = st.sidebar.slider("ARMA - MA 阶数", min_value=1, max_value=5, value=1) if use_arma else 1
+
+use_garch = st.sidebar.checkbox("启用 GARCH 模型", value=True)
+garch_p = st.sidebar.slider("GARCH - p 阶数", min_value=1, max_value=5, value=1) if use_garch else 1
+garch_q = st.sidebar.slider("GARCH - q 阶数", min_value=1, max_value=5, value=1) if use_garch else 1
+
+if st.sidebar.checkbox("ℹ️ ARMA/GARCH 说明"):
+    st.sidebar.info("""
+    **ARMA 模型**：自回归移动平均模型
+    - AR(p)：使用过去 p 个值预测当前值
+    - MA(q)：使用过去 q 个误差预测当前值
+    - 适合：平稳时间序列预测
+    
+    **GARCH 模型**：广义自回归条件异方差模型
+    - 用于预测波动率（风险）
+    - 适合：金融时间序列的波动率建模
     """)
 
 st.sidebar.subheader("🔧 模型参数")
@@ -504,38 +521,6 @@ with main_container:
                         transformer_model_name, transformer_model, X_train, y_train, X_test, y_test,
                         epochs=epochs, batch_size=batch_size, lr=learning_rate
                     )
-                    progress_bar.progress(60)
-                    status_text.text("训练传统统计模型...")
-                    
-                    # 计算收益率数据
-                    df['return'] = df['Close'].pct_change().fillna(0)
-                    
-                    # 划分训练集和测试集的收益率数据
-                    split_idx = int(len(df) * train_split)
-                    train_returns = df['return'].iloc[:split_idx].values
-                    test_returns = df['return'].iloc[split_idx:].values
-                    
-                    # 训练ARMA模型
-                    try:
-                        arma_model = ARIMA(train_returns, order=(1, 0, 1))
-                        arma_fit = arma_model.fit()
-                        pred_arma = arma_fit.forecast(steps=len(test_returns))
-                    except Exception as e:
-                        st.warning(f"ARMA模型训练失败: {str(e)}")
-                        pred_arma = np.zeros(len(test_returns))
-                    
-                    progress_bar.progress(80)
-                    
-                    # 训练GARCH模型
-                    try:
-                        garch_model = arch_model(train_returns, mean='AR', vol='GARCH', p=1, q=1)
-                        garch_fit = garch_model.fit(show_warning=False)
-                        garch_forecast = garch_fit.forecast(horizon=len(test_returns))
-                        pred_garch = garch_forecast.mean.iloc[-1].values
-                    except Exception as e:
-                        st.warning(f"GARCH模型训练失败: {str(e)}")
-                        pred_garch = np.zeros(len(test_returns))
-                    
                     progress_bar.progress(100)
                     status_text.text("训练完成!")
                 except Exception as e:
@@ -543,12 +528,52 @@ with main_container:
                     import traceback
                     st.error(f"详细错误信息: {traceback.format_exc()}")
                 
+                # 训练 ARMA 和 GARCH 模型
+                arma_metrics = None
+                garch_metrics = None
+                arma_preds = None
+                garch_preds = None
+                
+                try:
+                    if use_arma:
+                        status_text.text("训练 ARMA 模型...")
+                        ts_predictor = TimeSeriesPredictor()
+                        close_data = ts_predictor.prepare_data(df, target_col='Close')
+                        
+                        arma_result = ts_predictor.train_arma(
+                            'ARMA', close_data, 
+                            order=(arma_order_p, arma_order_q),
+                            test_size=1 - train_split
+                        )
+                        arma_metrics = arma_result['test_metrics']
+                        arma_preds = arma_result['predictions']
+                        st.success(f"✅ ARMA 模型训练完成!")
+                    
+                    if use_garch:
+                        status_text.text("训练 GARCH 模型...")
+                        ts_predictor = TimeSeriesPredictor()
+                        close_data = ts_predictor.prepare_data(df, target_col='Close')
+                        
+                        garch_result = ts_predictor.train_garch(
+                            'GARCH', close_data,
+                            p=garch_p, q=garch_q,
+                            test_size=1 - train_split
+                        )
+                        garch_metrics = garch_result['test_metrics']
+                        garch_preds = garch_result['predictions']
+                        st.success(f"✅ GARCH 模型训练完成!")
+                except Exception as e:
+                    st.warning(f"⚠️ ARMA/GARCH 训练出错: {str(e)}")
+                    import traceback
+                    st.warning(f"详细错误: {traceback.format_exc()}")
+                
                 st.header("📊 模型性能对比")
                 
-                col1, col2 = st.columns(2)
+                # 四模型对比 - 使用 2x2 布局
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    st.subheader(f"🧠 BiLSTM {bilstm_version} 评估结果")
+                    st.subheader(f"🧠 BiLSTM {bilstm_version}")
                     bilstm_metrics, bilstm_preds, actuals = predictor.evaluate_model(bilstm_model_name, X_test, y_test)
                     
                     for metric, value in bilstm_metrics.items():
@@ -556,13 +581,14 @@ with main_container:
                             'MSE': '均方误差 (MSE)',
                             'RMSE': '均方根误差 (RMSE)',
                             'MAE': '平均绝对误差 (MAE)',
+                            'MAPE': '平均绝对百分比误差 (MAPE)',
                             'R²': 'R² 评分',
                             'Direction_Accuracy': '方向准确率'
                         }.get(metric, metric)
                         st.metric(display_name, f"{value:.4f}")
                 
                 with col2:
-                    st.subheader(f"🤖 Transformer {transformer_version} 评估结果")
+                    st.subheader(f"🤖 Transformer {transformer_version}")
                     trans_metrics, trans_preds, _ = predictor.evaluate_model(transformer_model_name, X_test, y_test)
                     
                     for metric, value in trans_metrics.items():
@@ -570,10 +596,43 @@ with main_container:
                             'MSE': '均方误差 (MSE)',
                             'RMSE': '均方根误差 (RMSE)',
                             'MAE': '平均绝对误差 (MAE)',
+                            'MAPE': '平均绝对百分比误差 (MAPE)',
                             'R²': 'R² 评分',
                             'Direction_Accuracy': '方向准确率'
                         }.get(metric, metric)
                         st.metric(display_name, f"{value:.4f}")
+                
+                with col3:
+                    st.subheader("📈 ARMA 模型")
+                    if arma_metrics:
+                        for metric, value in arma_metrics.items():
+                            display_name = {
+                                'MSE': '均方误差 (MSE)',
+                                'RMSE': '均方根误差 (RMSE)',
+                                'MAE': '平均绝对误差 (MAE)',
+                                'MAPE': '平均绝对百分比误差 (MAPE)',
+                                'R²': 'R² 评分',
+                                'Direction_Accuracy': '方向准确率'
+                            }.get(metric, metric)
+                            st.metric(display_name, f"{value:.4f}")
+                    else:
+                        st.info("ARMA 模型未启用或训练失败")
+                
+                with col4:
+                    st.subheader("📊 GARCH 模型")
+                    if garch_metrics:
+                        for metric, value in garch_metrics.items():
+                            display_name = {
+                                'MSE': '均方误差 (MSE)',
+                                'RMSE': '均方根误差 (RMSE)',
+                                'MAE': '平均绝对误差 (MAE)',
+                                'MAPE': '平均绝对百分比误差 (MAPE)',
+                                'R²': 'R² 评分',
+                                'Direction_Accuracy': '方向准确率'
+                            }.get(metric, metric)
+                            st.metric(display_name, f"{value:.4f}")
+                    else:
+                        st.info("GARCH 模型未启用或训练失败")
                 
                 # 绘制预测对比图
                 st.subheader("📈 预测效果对比")
@@ -595,21 +654,37 @@ with main_container:
                     fig.add_trace(go.Scatter(
                         x=df['Date'].iloc[-len(bilstm_preds):],
                         y=bilstm_preds,
-                        name=f'BiLSTM {bilstm_version} 预测',
+                        name=f'BiLSTM {bilstm_version}',
                         line=dict(color='#FF7F0E', width=2, dash='dash')
                     ))
                     
                     fig.add_trace(go.Scatter(
                         x=df['Date'].iloc[-len(trans_preds):],
                         y=trans_preds,
-                        name=f'Transformer {transformer_version} 预测',
+                        name=f'Transformer {transformer_version}',
                         line=dict(color='#1F77B4', width=2, dash='dot')
                     ))
+                    
+                    if arma_preds is not None:
+                        fig.add_trace(go.Scatter(
+                            x=df['Date'].iloc[-len(arma_preds):],
+                            y=arma_preds,
+                            name='ARMA',
+                            line=dict(color='#2CA02C', width=2, dash='dashdot')
+                        ))
+                    
+                    if garch_preds is not None:
+                        fig.add_trace(go.Scatter(
+                            x=df['Date'].iloc[-len(garch_preds):],
+                            y=garch_preds,
+                            name='GARCH',
+                            line=dict(color='#9467BD', width=2, dash='longdash')
+                        ))
                     
                     fig.update_layout(
                         xaxis_title='日期',
                         yaxis_title='价格',
-                        title='实际值 vs 预测值',
+                        title='四模型预测对比',
                         template='plotly_dark',
                         height=500
                     )
@@ -637,6 +712,28 @@ with main_container:
                         fill='tozeroy',
                         fillcolor='rgba(31, 119, 180, 0.2)'
                     ))
+                    
+                    if arma_preds is not None:
+                        arma_error = np.array(arma_preds) - np.array(actuals)
+                        fig_error.add_trace(go.Scatter(
+                            x=df['Date'].iloc[-len(arma_preds):],
+                            y=arma_error,
+                            name='ARMA 误差',
+                            line=dict(color='#2CA02C', width=1.5),
+                            fill='tozeroy',
+                            fillcolor='rgba(44, 160, 44, 0.2)'
+                        ))
+                    
+                    if garch_preds is not None:
+                        garch_error = np.array(garch_preds) - np.array(actuals)
+                        fig_error.add_trace(go.Scatter(
+                            x=df['Date'].iloc[-len(garch_preds):],
+                            y=garch_error,
+                            name='GARCH 误差',
+                            line=dict(color='#9467BD', width=1.5),
+                            fill='tozeroy',
+                            fillcolor='rgba(148, 103, 189, 0.2)'
+                        ))
                     
                     fig_error.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
                     
@@ -770,6 +867,24 @@ with main_container:
                         line=dict(color='#1F77B4', width=1.5, dash='dot')
                     ))
                     
+                    if arma_preds is not None:
+                        arma_returns = np.diff(arma_preds) / arma_preds[:-1] * 100
+                        fig_ret.add_trace(go.Scatter(
+                            x=df['Date'].iloc[-len(arma_preds)+1:],
+                            y=arma_returns,
+                            name='ARMA 预测收益率',
+                            line=dict(color='#2CA02C', width=1.5, dash='dashdot')
+                        ))
+                    
+                    if garch_preds is not None:
+                        garch_returns = np.diff(garch_preds) / garch_preds[:-1] * 100
+                        fig_ret.add_trace(go.Scatter(
+                            x=df['Date'].iloc[-len(garch_preds)+1:],
+                            y=garch_returns,
+                            name='GARCH 预测收益率',
+                            line=dict(color='#9467BD', width=1.5, dash='longdash')
+                        ))
+                    
                     fig_ret.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
                     
                     fig_ret.update_layout(
@@ -833,7 +948,7 @@ with main_container:
                 
                 with chart_tabs[3]:
                     # 误差分布
-                    col7, col8 = st.columns(2)
+                    col7, col8, col9, col10 = st.columns(4)
                     
                     with col7:
                         st.markdown("**BiLSTM 误差分布**")
@@ -852,7 +967,7 @@ with main_container:
                             xaxis_title='预测误差',
                             yaxis_title='频数',
                             template='plotly_dark',
-                            height=350,
+                            height=300,
                             showlegend=False
                         )
                         st.plotly_chart(fig_hist1, use_container_width=True)
@@ -875,11 +990,65 @@ with main_container:
                             xaxis_title='预测误差',
                             yaxis_title='频数',
                             template='plotly_dark',
-                            height=350,
+                            height=300,
                             showlegend=False
                         )
                         st.plotly_chart(fig_hist2, use_container_width=True)
                         st.caption(f"标准差: {np.std(trans_error):.4f}")
+                    
+                    with col9:
+                        st.markdown("**ARMA 误差分布**")
+                        if arma_preds is not None:
+                            arma_error = np.array(arma_preds) - np.array(actuals)
+                            fig_hist3 = go.Figure()
+                            fig_hist3.add_trace(go.Histogram(
+                                x=arma_error,
+                                nbinsx=30,
+                                marker_color='#2CA02C',
+                                opacity=0.7,
+                                name='误差分布'
+                            ))
+                            fig_hist3.add_vline(x=0, line_dash="dash", line_color="white")
+                            fig_hist3.add_vline(x=np.mean(arma_error), line_dash="dash", line_color="red",
+                                               annotation_text=f"均值: {np.mean(arma_error):.4f}")
+                            fig_hist3.update_layout(
+                                xaxis_title='预测误差',
+                                yaxis_title='频数',
+                                template='plotly_dark',
+                                height=300,
+                                showlegend=False
+                            )
+                            st.plotly_chart(fig_hist3, use_container_width=True)
+                            st.caption(f"标准差: {np.std(arma_error):.4f}")
+                        else:
+                            st.info("ARMA 未启用")
+                    
+                    with col10:
+                        st.markdown("**GARCH 误差分布**")
+                        if garch_preds is not None:
+                            garch_error = np.array(garch_preds) - np.array(actuals)
+                            fig_hist4 = go.Figure()
+                            fig_hist4.add_trace(go.Histogram(
+                                x=garch_error,
+                                nbinsx=30,
+                                marker_color='#9467BD',
+                                opacity=0.7,
+                                name='误差分布'
+                            ))
+                            fig_hist4.add_vline(x=0, line_dash="dash", line_color="white")
+                            fig_hist4.add_vline(x=np.mean(garch_error), line_dash="dash", line_color="red",
+                                               annotation_text=f"均值: {np.mean(garch_error):.4f}")
+                            fig_hist4.update_layout(
+                                xaxis_title='预测误差',
+                                yaxis_title='频数',
+                                template='plotly_dark',
+                                height=300,
+                                showlegend=False
+                            )
+                            st.plotly_chart(fig_hist4, use_container_width=True)
+                            st.caption(f"标准差: {np.std(garch_error):.4f}")
+                        else:
+                            st.info("GARCH 未启用")
                     
                     # 误差箱线图对比
                     fig_box = go.Figure()
@@ -895,9 +1064,25 @@ with main_container:
                         marker_color='#1F77B4',
                         boxmean=True
                     ))
+                    if arma_preds is not None:
+                        arma_error = np.array(arma_preds) - np.array(actuals)
+                        fig_box.add_trace(go.Box(
+                            y=arma_error,
+                            name='ARMA',
+                            marker_color='#2CA02C',
+                            boxmean=True
+                        ))
+                    if garch_preds is not None:
+                        garch_error = np.array(garch_preds) - np.array(actuals)
+                        fig_box.add_trace(go.Box(
+                            y=garch_error,
+                            name='GARCH',
+                            marker_color='#9467BD',
+                            boxmean=True
+                        ))
                     fig_box.update_layout(
                         yaxis_title='预测误差',
-                        title='误差分布箱线图对比',
+                        title='四模型误差分布箱线图对比',
                         template='plotly_dark',
                         height=400
                     )
@@ -934,188 +1119,68 @@ with main_container:
                 # 比较方向准确率
                 bilstm_dir_acc = bilstm_metrics.get('Direction_Accuracy', 0)
                 trans_dir_acc = trans_metrics.get('Direction_Accuracy', 0)
+                arma_dir_acc = arma_metrics.get('Direction_Accuracy', 0) if arma_metrics else 0
+                garch_dir_acc = garch_metrics.get('Direction_Accuracy', 0) if garch_metrics else 0
                 
-                if bilstm_dir_acc > trans_dir_acc:
-                    st.success(f"🧠 **BiLSTM 模型**表现更好！")
-                    st.info(f"方向准确率: {bilstm_dir_acc:.2f} vs {trans_dir_acc:.2f}")
-                elif trans_dir_acc > bilstm_dir_acc:
-                    st.success(f"🤖 **Transformer 模型**表现更好！")
-                    st.info(f"方向准确率: {trans_dir_acc:.2f} vs {bilstm_dir_acc:.2f}")
-                else:
-                    st.info(f"两个模型表现相当！方向准确率: {bilstm_dir_acc:.2f}")
+                # 比较所有模型
+                models_comparison = [
+                    ('BiLSTM', bilstm_dir_acc, '#FF7F0E'),
+                    ('Transformer', trans_dir_acc, '#1F77B4'),
+                ]
+                if arma_metrics:
+                    models_comparison.append(('ARMA', arma_dir_acc, '#2CA02C'))
+                if garch_metrics:
+                    models_comparison.append(('GARCH', garch_dir_acc, '#9467BD'))
                 
-                # 多模型对比分析（包含传统统计模型）
-                st.header("📊 多模型综合对比分析")
+                # 找出最佳模型
+                best_model = max(models_comparison, key=lambda x: x[1])
                 
-                # 计算方向准确率函数
-                def calc_directional_accuracy(y_true, y_pred):
-                    true_dir = np.sign(y_true)
-                    pred_dir = np.sign(y_pred)
-                    return accuracy_score(true_dir, pred_dir)
+                if best_model[0] == 'BiLSTM':
+                    st.success(f"🧠 **BiLSTM 模型**表现最好！")
+                elif best_model[0] == 'Transformer':
+                    st.success(f"🤖 **Transformer 模型**表现最好！")
+                elif best_model[0] == 'ARMA':
+                    st.success(f"📈 **ARMA 模型**表现最好！")
+                elif best_model[0] == 'GARCH':
+                    st.success(f"📊 **GARCH 模型**表现最好！")
                 
-                # 计算策略累计收益率函数
-                def calc_strategy_return(y_true, y_pred):
-                    positions = np.sign(y_pred)
-                    strategy_daily_returns = positions * y_true
-                    cumulative_return = np.cumprod(1 + strategy_daily_returns) - 1
-                    return cumulative_return
+                st.info(f"方向准确率: " + " vs ".join([f"{m[0]}: {m[1]:.2f}" for m in models_comparison]))
                 
-                # 计算各模型的方向准确率
-                acc_transformer = calc_directional_accuracy(test_returns, np.diff(trans_preds) / trans_preds[:-1])
-                acc_bilstm = calc_directional_accuracy(test_returns, np.diff(bilstm_preds) / bilstm_preds[:-1])
-                acc_arma = calc_directional_accuracy(test_returns, pred_arma)
-                acc_garch = calc_directional_accuracy(test_returns, pred_garch)
+                # 综合评分
+                st.subheader("📊 综合评分对比")
+                comparison_data = []
+                for model_name, dir_acc, color in models_comparison:
+                    if model_name == 'BiLSTM':
+                        metrics = bilstm_metrics
+                    elif model_name == 'Transformer':
+                        metrics = trans_metrics
+                    elif model_name == 'ARMA':
+                        metrics = arma_metrics
+                    elif model_name == 'GARCH':
+                        metrics = garch_metrics
+                    
+                    if metrics:
+                        # 综合评分：RMSE越低越好，R²和方向准确率越高越好
+                        rmse_score = 1 / (1 + metrics.get('RMSE', 0))
+                        r2_score = max(0, metrics.get('R²', 0))
+                        dir_score = metrics.get('Direction_Accuracy', 0)
+                        mape_score = 1 / (1 + metrics.get('MAPE', 0))
+                        
+                        # 加权平均
+                        overall_score = (rmse_score * 0.3 + r2_score * 0.3 + dir_score * 0.3 + mape_score * 0.1) * 100
+                        
+                        comparison_data.append({
+                            '模型': model_name,
+                            'RMSE': f"{metrics.get('RMSE', 0):.4f}",
+                            'MAPE': f"{metrics.get('MAPE', 0):.2f}%",
+                            'R²': f"{metrics.get('R²', 0):.4f}",
+                            '方向准确率': f"{metrics.get('Direction_Accuracy', 0):.2%}",
+                            '综合评分': f"{overall_score:.2f}"
+                        })
                 
-                # 计算各模型的策略累计收益
-                cum_ret_transformer = calc_strategy_return(test_returns, np.diff(trans_preds) / trans_preds[:-1])
-                cum_ret_bilstm = calc_strategy_return(test_returns, np.diff(bilstm_preds) / bilstm_preds[:-1])
-                cum_ret_arma = calc_strategy_return(test_returns, pred_arma)
-                cum_ret_garch = calc_strategy_return(test_returns, pred_garch)
-                
-                # 买入持有基准
-                bh_cum_ret = np.cumprod(1 + test_returns) - 1
-                
-                # 创建对比表格
-                st.subheader("📋 模型性能对比表")
-                comparison_results = pd.DataFrame({
-                    '模型': ['Transformer', 'BiLSTM', 'ARMA', 'GARCH', '买入持有'],
-                    '方向准确率': [f"{acc_transformer:.2%}", f"{acc_bilstm:.2%}", f"{acc_arma:.2%}", f"{acc_garch:.2%}", "N/A"],
-                    '最终累计收益率': [f"{cum_ret_transformer[-1]:.2%}", f"{cum_ret_bilstm[-1]:.2%}", f"{cum_ret_arma[-1]:.2%}", f"{cum_ret_garch[-1]:.2%}", f"{bh_cum_ret[-1]:.2%}"],
-                    '最大回撤': [
-                        f"{np.min(np.cumprod(1 + np.diff(trans_preds) / trans_preds[:-1] * test_returns) / np.maximum.accumulate(np.cumprod(1 + np.diff(trans_preds) / trans_preds[:-1] * test_returns)) - 1):.2%}",
-                        f"{np.min(np.cumprod(1 + np.diff(bilstm_preds) / bilstm_preds[:-1] * test_returns) / np.maximum.accumulate(np.cumprod(1 + np.diff(bilstm_preds) / bilstm_preds[:-1] * test_returns)) - 1):.2%}",
-                        f"{np.min(np.cumprod(1 + pred_arma * test_returns) / np.maximum.accumulate(np.cumprod(1 + pred_arma * test_returns)) - 1):.2%}",
-                        f"{np.min(np.cumprod(1 + pred_garch * test_returns) / np.maximum.accumulate(np.cumprod(1 + pred_garch * test_returns)) - 1):.2%}",
-                        f"{np.min(bh_cum_ret / np.maximum.accumulate(bh_cum_ret) - 1):.2%}"
-                    ]
-                })
-                st.dataframe(comparison_results, use_container_width=True, hide_index=True)
-                
-                # 绘制累计收益对比图
-                st.subheader("📈 累计收益率对比")
-                
-                fig_cum_ret = go.Figure()
-                
-                test_dates = df['Date'].iloc[split_idx:].values
-                
-                fig_cum_ret.add_trace(go.Scatter(
-                    x=test_dates,
-                    y=cum_ret_transformer,
-                    name=f'Transformer (准确率: {acc_transformer:.1%})',
-                    line=dict(color='#1F77B4', width=2.5)
-                ))
-                
-                fig_cum_ret.add_trace(go.Scatter(
-                    x=test_dates,
-                    y=cum_ret_bilstm,
-                    name=f'BiLSTM (准确率: {acc_bilstm:.1%})',
-                    line=dict(color='#FF7F0E', width=2.5)
-                ))
-                
-                fig_cum_ret.add_trace(go.Scatter(
-                    x=test_dates,
-                    y=cum_ret_arma,
-                    name=f'ARMA (准确率: {acc_arma:.1%})',
-                    line=dict(color='#2CA02C', width=2, dash='dash')
-                ))
-                
-                fig_cum_ret.add_trace(go.Scatter(
-                    x=test_dates,
-                    y=cum_ret_garch,
-                    name=f'GARCH (准确率: {acc_garch:.1%})',
-                    line=dict(color='#9467BD', width=2, dash='dot')
-                ))
-                
-                fig_cum_ret.add_trace(go.Scatter(
-                    x=test_dates,
-                    y=bh_cum_ret,
-                    name='买入持有',
-                    line=dict(color='white', width=2, dash='dashdot')
-                ))
-                
-                fig_cum_ret.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-                
-                fig_cum_ret.update_layout(
-                    xaxis_title='日期',
-                    yaxis_title='累计收益率',
-                    title='多模型策略累计收益率对比',
-                    template='plotly_dark',
-                    height=500,
-                    legend=dict(
-                        x=0.01,
-                        y=0.99,
-                        bgcolor='rgba(0,0,0,0.7)',
-                        bordercolor='white',
-                        borderwidth=1
-                    )
-                )
-                st.plotly_chart(fig_cum_ret, use_container_width=True)
-                
-                # 模型性能雷达图
-                st.subheader("🎯 模型性能雷达图")
-                
-                # 标准化指标用于雷达图
-                def normalize_score(value, max_val, min_val=0):
-                    return (value - min_val) / (max_val - min_val) if max_val > min_val else 0.5
-                
-                # 计算各项指标
-                metrics_data = {
-                    'Transformer': {
-                        '方向准确率': acc_transformer,
-                        '最终收益': cum_ret_transformer[-1],
-                        '稳定性': 1 - np.std(np.diff(cum_ret_transformer)) / np.mean(np.abs(np.diff(cum_ret_transformer))) if np.mean(np.abs(np.diff(cum_ret_transformer))) > 0 else 0
-                    },
-                    'BiLSTM': {
-                        '方向准确率': acc_bilstm,
-                        '最终收益': cum_ret_bilstm[-1],
-                        '稳定性': 1 - np.std(np.diff(cum_ret_bilstm)) / np.mean(np.abs(np.diff(cum_ret_bilstm))) if np.mean(np.abs(np.diff(cum_ret_bilstm))) > 0 else 0
-                    },
-                    'ARMA': {
-                        '方向准确率': acc_arma,
-                        '最终收益': cum_ret_arma[-1],
-                        '稳定性': 1 - np.std(np.diff(cum_ret_arma)) / np.mean(np.abs(np.diff(cum_ret_arma))) if np.mean(np.abs(np.diff(cum_ret_arma))) > 0 else 0
-                    },
-                    'GARCH': {
-                        '方向准确率': acc_garch,
-                        '最终收益': cum_ret_garch[-1],
-                        '稳定性': 1 - np.std(np.diff(cum_ret_garch)) / np.mean(np.abs(np.diff(cum_ret_garch))) if np.mean(np.abs(np.diff(cum_ret_garch))) > 0 else 0
-                    }
-                }
-                
-                # 创建雷达图
-                categories = ['方向准确率', '最终收益', '稳定性']
-                
-                fig_radar = go.Figure()
-                
-                colors_radar = ['#1F77B4', '#FF7F0E', '#2CA02C', '#9467BD']
-                models = ['Transformer', 'BiLSTM', 'ARMA', 'GARCH']
-                
-                for i, model in enumerate(models):
-                    values = [
-                        metrics_data[model]['方向准确率'],
-                        max(0, metrics_data[model]['最终收益']),
-                        max(0, metrics_data[model]['稳定性'])
-                    ]
-                    fig_radar.add_trace(go.Scatterpolar(
-                        r=values,
-                        theta=categories,
-                        fill='toself',
-                        name=model,
-                        line_color=colors_radar[i]
-                    ))
-                
-                fig_radar.update_layout(
-                    polar=dict(
-                        radialaxis=dict(
-                            visible=True,
-                            range=[0, 1]
-                        )),
-                    showlegend=True,
-                    title='模型综合性能雷达图',
-                    template='plotly_dark',
-                    height=500
-                )
-                st.plotly_chart(fig_radar, use_container_width=True)
+                if comparison_data:
+                    comparison_df = pd.DataFrame(comparison_data)
+                    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
                 
                 # 预测未来
                 st.header("🔮 未来预测")
