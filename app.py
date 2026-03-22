@@ -8,7 +8,7 @@ import plotly.express as px
 from models import (
     BiLSTMModelV1, BiLSTMModelV2, BiLSTMModelV3,
     TransformerModelV1, TransformerModelV2,
-    StockPredictor, TimeSeriesPredictor
+    StockPredictor
 )
 import io
 
@@ -535,6 +535,9 @@ with main_container:
                 garch_preds = None
                 
                 try:
+                    # 延迟导入 TimeSeriesPredictor
+                    from models import TimeSeriesPredictor
+                    
                     if use_arma:
                         status_text.text("训练 ARMA 模型...")
                         ts_predictor = TimeSeriesPredictor()

@@ -591,17 +591,19 @@ class StockPredictor:
 class ARMAModel:
     """ARMA 模型 - 自回归移动平均模型"""
     def __init__(self, order=(1, 1)):
-        from statsmodels.tsa.arima.model import ARIMA
         self.order = order
         self.model = None
         self.fitted = False
         
     def fit(self, y):
-        from statsmodels.tsa.arima.model import ARIMA
-        self.model = ARIMA(y, order=(self.order[0], 0, self.order[1]))
-        self.model = self.model.fit()
-        self.fitted = True
-        return self
+        try:
+            from statsmodels.tsa.arima.model import ARIMA
+            self.model = ARIMA(y, order=(self.order[0], 0, self.order[1]))
+            self.model = self.model.fit()
+            self.fitted = True
+            return self
+        except Exception as e:
+            raise ImportError(f"ARMA 模型训练失败: {str(e)}。请确保已安装 statsmodels: pip install statsmodels")
     
     def predict(self, steps=1):
         if not self.fitted:
@@ -617,18 +619,20 @@ class ARMAModel:
 class GARCHModel:
     """GARCH 模型 - 广义自回归条件异方差模型"""
     def __init__(self, p=1, q=1):
-        from arch import arch_model
         self.p = p
         self.q = q
         self.model = None
         self.fitted = False
         
     def fit(self, y):
-        from arch import arch_model
-        self.model = arch_model(y, vol='Garch', p=self.p, q=self.q)
-        self.model = self.model.fit(disp='off')
-        self.fitted = True
-        return self
+        try:
+            from arch import arch_model
+            self.model = arch_model(y, vol='Garch', p=self.p, q=self.q)
+            self.model = self.model.fit(disp='off')
+            self.fitted = True
+            return self
+        except Exception as e:
+            raise ImportError(f"GARCH 模型训练失败: {str(e)}。请确保已安装 arch: pip install arch")
     
     def predict(self, horizon=1):
         if not self.fitted:
