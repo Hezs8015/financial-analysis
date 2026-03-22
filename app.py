@@ -518,7 +518,7 @@ with main_container:
                     # 训练ARMA模型
                     try:
                         arma_model = ARIMA(train_returns, order=(1, 0, 1))
-                        arma_fit = arma_model.fit(disp='off')
+                        arma_fit = arma_model.fit()
                         pred_arma = arma_fit.forecast(steps=len(test_returns))
                     except Exception as e:
                         st.warning(f"ARMA模型训练失败: {str(e)}")
@@ -529,7 +529,7 @@ with main_container:
                     # 训练GARCH模型
                     try:
                         garch_model = arch_model(train_returns, mean='AR', vol='GARCH', p=1, q=1)
-                        garch_fit = garch_model.fit(disp='off')
+                        garch_fit = garch_model.fit(show_warning=False)
                         garch_forecast = garch_fit.forecast(horizon=len(test_returns))
                         pred_garch = garch_forecast.mean.iloc[-1].values
                     except Exception as e:
